@@ -50,6 +50,20 @@ def detect_objects(image, conf=0.25, iou=0.45, classes=None):
 
     return detected_objects
 
+def extract_tags(descriptions, detections):
+    # Combinar descripciones de BLIP y detecciones de YOLO para generar tags
+    tags = set()
+
+    # Extraer palabras clave de las descripciones
+    for description in descriptions:
+        tags.update(description.lower().split())
+
+    # Añadir etiquetas de YOLO
+    for detection in detections:
+        tags.add(detection["label"].lower())
+
+    return list(tags)
+
 @app.route("/blip", methods=["POST"])
 def blip_endpoint():
     try:
@@ -93,6 +107,44 @@ def yolo_endpoint():
         # Detectar objetos con YOLO
         detections = detect_objects(image, conf=conf, iou=iou, classes=classes)
         return jsonify({"tags": detections})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/combined", methods=["POST"])
+def combined_endpoint():
+    try:
+        if 'image' not in request.files:
+            return jsonify({"error": "Se requiere un archivo de imagen"}), 400
+
+        # Leer imagen desde el archivo
+        file = request.files['image']
+        image_data = np.frombuffer(file.read(), np.uint8)
+        image = cv2.imdecode(image_data, cv2.IMREAD_COLOR)
+
+        # Leer parámetros opcionales
+        max_length = int(request.form.get("max_length", 20))
+        num_beams = int(request.form.get("num_beams", 1))
+        num_return_sequences = int(request.form.get("num_return_sequences", 1))
+        conf = float(request.form.get("conf", 0.25))
+        iou = float(request.form.get("iou", 0.45))
+        classes = request.form.get("classes")
+        if classes:
+            classes = [int(c) for c in classes.split(",")]
+
+        # Generar descripciones con BLIP
+        descriptions = generate_caption(image, max_length=max_length, num_beams=num_beams, num_return_sequences=num_return_sequences)
+
+        # Detectar objetos con YOLO
+        detections = detect_objects(image, conf=conf, iou=iou, classes=classes)
+
+        # Extraer tags combinados
+        tags = extract_tags(descriptions, detections)
+
+        return jsonify({
+            "descriptions": descriptions,
+            "detections": detections,
+            "tags": tags
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
