@@ -1,11 +1,22 @@
 from flask import Flask, request, jsonify
 from transformers import BlipProcessor, BlipForConditionalGeneration, CLIPProcessor, CLIPModel
+from huggingface_hub import InferenceApi
 import torch
 import cv2
 import numpy as np
 import base64
+import shutil
+import os
+import json
 
 app = Flask(__name__)
+
+# Limpiar la caché de Hugging Face (opcional)
+def clear_cache():
+    cache_dir = os.path.expanduser("~/.cache/huggingface/transformers")
+    if os.path.exists(cache_dir):
+        shutil.rmtree(cache_dir)
+        print("Caché de Hugging Face eliminada correctamente.")
 
 # Cargar modelo BLIP
 def load_blip_model():
@@ -14,6 +25,14 @@ def load_blip_model():
     return processor, model
 
 processor, model = None, None
+
+# Cargar modelo BLIP-2
+def load_blip2_model():
+    processor = BlipProcessor.from_pretrained("Salesforce/blip2-flan-t5-xl")
+    model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip2-flan-t5-xl")
+    return processor, model
+
+blip2_processor, blip2_model = None, None
 
 # Cargar modelo CLIP
 def load_clip_model():
@@ -104,6 +123,36 @@ def blip_endpoint():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/blip2", methods=["POST"])
+def blip2_endpoint():
+    try:
+        if 'image' not in request.files:
+            return jsonify({"error": "Se requiere un archivo de imagen"}), 400
+
+        # Leer imagen desde el archivo
+        file = request.files['image']
+        image_data = np.frombuffer(file.read(), np.uint8)
+        image = cv2.imdecode(image_data, cv2.IMREAD_COLOR)
+
+        # Leer parámetros opcionales
+        max_length = int(request.form.get("max_length", 20))
+        num_beams = int(request.form.get("num_beams", 1))
+        num_return_sequences = int(request.form.get("num_return_sequences", 1))
+
+        # Generar descripciones con BLIP-2
+        inputs = blip2_processor(image, return_tensors="pt").to("cuda" if torch.cuda.is_available() else "cpu")
+        outputs = blip2_model.generate(
+            **inputs,
+            max_length=max_length,
+            num_beams=num_beams,
+            num_return_sequences=num_return_sequences
+        )
+        descriptions = [blip2_processor.decode(output, skip_special_tokens=True) for output in outputs]
+
+        return jsonify({"descriptions": descriptions})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/yolo", methods=["POST"])
 def yolo_endpoint():
     try:
@@ -190,8 +239,54 @@ def clip_endpoint():
         return jsonify({"tags": tags})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    
 
+# Configurar API de Hugging Face para BLIP-2
+blip2_api = InferenceApi(repo_id="Salesforce/blip2-flan-t5-xl", token=os.getenv("HUGGINGFACE_TOKEN"))
+
+def use_blip2_api(image_path):
+    with open(image_path, "rb") as f:
+        response = blip2_api(f.read())
+    return response
+
+@app.route("/blip2-api", methods=["POST"])
+def blip2_api_endpoint():
+    try:
+        if 'image' not in request.files:
+            return jsonify({"error": "Se requiere un archivo de imagen"}), 400
+
+        # Guardar imagen temporalmente
+        file = request.files['image']
+        image_path = "temp_image.jpg"
+        with open(image_path, "wb") as temp_file:
+            temp_file.write(file.read())
+
+        # Usar la API de Hugging Face para BLIP-2
+        response = use_blip2_api(image_path)
+
+        # Eliminar archivo temporal
+        os.remove(image_path)
+
+        # Asegurarse de que la respuesta sea string
+        if isinstance(response, bytes):
+            response = response.decode("utf-8", errors="replace")
+
+        # Intentar parsear la respuesta a objeto Python
+        try:
+            response_dict = json.loads(response)
+        except ValueError:
+            # Si no es un JSON válido, lo devolvemos encapsulado
+            response_dict = {"result": response}
+
+        return jsonify(response_dict)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 if __name__ == "__main__":
+    # Limpiar caché si es necesario
+    clear_cache()
+
+    # Cargar modelos
     processor, model = load_blip_model()
     clip_processor, clip_model = load_clip_model()
+    # blip2_processor, blip2_model = load_blip2_model()
     app.run(host="0.0.0.0", port=5000)
