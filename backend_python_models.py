@@ -299,6 +299,29 @@ def calculate_semantic_proximity():
         return jsonify({"similarities": similarity_percentages})
     except Exception as e:
         return jsonify({"error": str(e)}), 400
+    
+@app.route('/semantic_proximity_obj', methods=['POST'])
+def calculate_semantic_proximity_obj():
+    try:
+        # Parse JSON request
+        data = request.get_json()
+        tag = preprocess_text(data['tag'])
+        tag_list = [{"id": item["id"], "text": preprocess_text(item["text"])} for item in data['tag_list']]
+
+        # Encode the input tag and tag list texts
+        tag_embedding = embeddings_model.encode(tag, convert_to_tensor=True)
+        tag_list_embeddings = embeddings_model.encode([item['text'] for item in tag_list], convert_to_tensor=True)
+
+        # Compute cosine similarities
+        similarities = util.cos_sim(tag_embedding, tag_list_embeddings)
+
+        # Convert similarities to percentage and map to tag IDs
+        similarity_percentages = {item['id']: round(float(similarity) * 100, 2) 
+                                   for item, similarity in zip(tag_list, similarities[0])}
+
+        return jsonify({"similarities": similarity_percentages})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
 @app.route('/generate_tags', methods=['POST'])
 def generate_tags():
