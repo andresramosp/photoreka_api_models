@@ -3,6 +3,8 @@ from transformers import BlipProcessor, BlipForConditionalGeneration, CLIPProces
 from sentence_transformers import SentenceTransformer, util
 from huggingface_hub import InferenceClient
 from nltk.stem import WordNetLemmatizer
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.feature_extraction.text import TfidfVectorizer
 from dotenv import load_dotenv
 import torch
 import cv2
@@ -14,6 +16,7 @@ import json
 import requests
 import nltk
 import spacy
+import hashlib
 
 
 app = Flask(__name__)
@@ -284,6 +287,19 @@ def calculate_semantic_proximity():
         data = request.get_json()
         tag = preprocess_text(data['tag'])
         tag_list = [preprocess_text(t) for t in data['tag_list']]
+        threshold_percent = data.get('threshold', 0)  # Default threshold is 0
+
+        # Convert threshold from percentage to similarity value (0 to 1)
+        threshold = threshold_percent / 100.0
+
+        # Generate cache key
+        tag_hash = hashlib.md5(tag.encode()).hexdigest()
+        tag_list_hash = hashlib.md5(''.join(tag_list).encode()).hexdigest()
+        cache_key = f"{tag_hash}:{tag_list_hash}:{threshold_percent}"
+
+        # Check cache
+        if cache_key in similarity_cache:
+            return jsonify({"similarities": similarity_cache[cache_key]})
 
         # Encode the input tag and tag list
         tag_embedding = embeddings_model.encode(tag, convert_to_tensor=True)
@@ -292,13 +308,44 @@ def calculate_semantic_proximity():
         # Compute cosine similarities
         similarities = util.cos_sim(tag_embedding, tag_list_embeddings)
 
-        # Convert similarities to percentage and map to tag list
-        similarity_percentages = {original_tag: round(float(similarity) * 100, 2) 
-                                   for original_tag, similarity in zip(data['tag_list'], similarities[0])}
+        # Filter by threshold and convert similarities to percentage
+        similarity_percentages = {
+            original_tag: round(float(similarity) * 100, 2)
+            for original_tag, similarity in zip(data['tag_list'], similarities[0])
+            if float(similarity) >= threshold
+        }
+
+        # Cache the result
+        similarity_cache[cache_key] = similarity_percentages
 
         return jsonify({"similarities": similarity_percentages})
     except Exception as e:
         return jsonify({"error": str(e)}), 400
+
+@app.route('/semantic_proximity_bulk', methods=['POST'])
+def semantic_proximity_bulk():
+    data = request.get_json()
+    tags1 = data.get('tags1', [])
+    tags2 = data.get('tags2', [])
+
+    if not tags1 or not tags2:
+        return jsonify({'error': 'Both tags1 and tags2 must be provided'}), 400
+
+    # Obtener embeddings para ambas listas
+    embeddings1 = embeddings_model.encode(tags1)
+    embeddings2 = embeddings_model.encode(tags2)
+
+    # Calcular similitudes de coseno
+    similarities = cosine_similarity(embeddings1, embeddings2)
+
+    # Construir el resultado como un diccionario
+    result = {}
+    for i, tag1 in enumerate(tags1):
+        result[tag1] = {
+            tags2[j]: float(similarities[i, j]) for j in range(len(tags2))
+        }
+
+    return jsonify({'similarities': result})
     
 @app.route('/semantic_proximity_obj', methods=['POST'])
 def calculate_semantic_proximity_obj():
@@ -395,6 +442,7 @@ if __name__ == "__main__":
 
     # Cargar modelos
     embeddings_model, lemmatizer, spacy_model = load_embeddings_model()
+    similarity_cache = {}
     processor, model = load_blip_model()
     clip_processor, clip_model = load_clip_model()
 
