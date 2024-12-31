@@ -5,6 +5,7 @@ from huggingface_hub import InferenceClient
 from nltk.stem import WordNetLemmatizer
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import TfidfVectorizer
+from SPARQLWrapper import SPARQLWrapper, JSON
 from dotenv import load_dotenv
 import torch
 import cv2
@@ -17,7 +18,7 @@ import requests
 import nltk
 import spacy
 import hashlib
-
+from nltk.corpus import wordnet
 
 app = Flask(__name__)
 
@@ -37,6 +38,15 @@ def load_embeddings_model():
     lemmatizer = WordNetLemmatizer()
     spacy_model = spacy.load("en_core_web_sm")  # Load a small English NLP model
     return model, lemmatizer, spacy_model
+
+
+def load_wordnet():
+    try:
+        nltk.data.find('corpora/wordnet')
+        nltk.data.find('corpora/omw-1.4')
+    except LookupError:
+        nltk.download('wordnet')
+        nltk.download('omw-1.4')
 
 def load_blip_model():
     processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
@@ -275,10 +285,11 @@ def llava_spaces_endpoint():
         return jsonify({"error": str(e)}), 500
 
 def preprocess_text(text):
-    """Normalize text by lemmatizing and converting to lowercase if it's a single word."""
-    if len(text.split()) == 1:  # Apply lemmatization only for single words
-        return lemmatizer.lemmatize(text.lower())
-    return text.lower()
+    """Normalize text by lemmatizing, converting to lowercase, and replacing underscores with spaces."""
+    normalized_text = text.lower().replace('_', ' ')
+    if len(normalized_text.split()) == 1:  # Apply lemmatization only for single words
+        return lemmatizer.lemmatize(normalized_text)
+    return normalized_text
 
 @app.route('/semantic_proximity', methods=['POST'])
 def calculate_semantic_proximity():
@@ -322,30 +333,7 @@ def calculate_semantic_proximity():
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
-@app.route('/semantic_proximity_bulk', methods=['POST'])
-def semantic_proximity_bulk():
-    data = request.get_json()
-    tags1 = data.get('tags1', [])
-    tags2 = data.get('tags2', [])
 
-    if not tags1 or not tags2:
-        return jsonify({'error': 'Both tags1 and tags2 must be provided'}), 400
-
-    # Obtener embeddings para ambas listas
-    embeddings1 = embeddings_model.encode(tags1)
-    embeddings2 = embeddings_model.encode(tags2)
-
-    # Calcular similitudes de coseno
-    similarities = cosine_similarity(embeddings1, embeddings2)
-
-    # Construir el resultado como un diccionario
-    result = {}
-    for i, tag1 in enumerate(tags1):
-        result[tag1] = {
-            tags2[j]: float(similarities[i, j]) for j in range(len(tags2))
-        }
-
-    return jsonify({'similarities': result})
     
 @app.route('/semantic_proximity_obj', methods=['POST'])
 def calculate_semantic_proximity_obj():
@@ -403,6 +391,202 @@ def generate_tags():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+
+# @app.route('/get_semantically_contained_words_embeddings', methods=['POST'])
+# def get_related_words():
+#     try:
+#         # Parsear el JSON de la solicitud
+#         data = request.json
+#         word = preprocess_text(data.get('word'))
+#         tag_list = [preprocess_text(tag) for tag in data.get('tag_list', [])]
+#         num_results = data.get('num_results', 10)  # Por defecto, 10 resultados
+#         threshold_percent = data.get('threshold', 50)  # Umbral por defecto: 50%
+#         levels = data.get('levels', 1)  # Por defecto, 1 nivel de profundidad
+
+#         if not word:
+#             return jsonify({'error': 'Por favor, proporciona un parámetro word'}), 400
+
+#         # Convertir el umbral de porcentaje a valor de similitud (0 a 1)
+#         threshold = threshold_percent / 100.0
+
+#         if not tag_list:
+#             # Usar WordNet para encontrar palabras relacionadas
+#             synsets = wordnet.synsets(word)
+#             related_words = set()
+
+#             for synset in synsets:
+#                 # Incluir sinónimos
+#                 related_words.update([lemma.name() for lemma in synset.lemmas()])
+
+#                 # Incluir hipónimos hasta el nivel especificado
+#                 hyponyms = get_hyponyms_recursively(synset, levels)
+#                 related_words.update([lemma.name() for hyponym in hyponyms for lemma in hyponym.lemmas()])
+
+#             # Limitar el número de resultados
+#             related_words = list(related_words)[:num_results]
+
+#             return jsonify({'word': word, 'related_words': related_words})
+
+#         # Obtener embeddings para la palabra y la lista de tags
+#         word_embedding = embeddings_model.encode(word, convert_to_tensor=True)
+#         tag_list_embeddings = embeddings_model.encode(tag_list, convert_to_tensor=True)
+
+#         # Calcular similitudes de coseno
+#         similarities = util.cos_sim(word_embedding, tag_list_embeddings)
+
+#         # Filtrar la tag_list por proximidad semántica
+#         filtered_tag_list = [
+#             tag for tag, similarity in zip(tag_list, similarities[0])
+#             if float(similarity) >= threshold
+#         ]
+
+#         # Usar WordNet para encontrar palabras relacionadas solo dentro de la lista filtrada
+#         synsets = wordnet.synsets(word)
+#         related_words = set()
+
+#         for synset in synsets:
+#             # Incluir sinónimos
+#             related_words.update([lemma.name() for lemma in synset.lemmas()])
+
+#             # Incluir hipónimos hasta el nivel especificado
+#             hyponyms = get_hyponyms_recursively(synset, levels)
+#             related_words.update([lemma.name() for hyponym in hyponyms for lemma in hyponym.lemmas()])
+
+#         # Filtrar las palabras relacionadas que estén en la lista filtrada
+#         related_words = list(set(filtered_tag_list) & related_words)[:num_results]
+
+#         for synset in synsets:
+#             print(f"Hipónimos de {synset.name()}: {[lemma.name() for hyponym in synset.hyponyms() for lemma in hyponym.lemmas()]}")
+    
+#         # Imprimir similitudes calculadas
+#         print(f"Similitudes calculadas: {filtered_tag_list}")
+
+#         return jsonify({'word': word, 'related_words': related_words})
+
+#     except Exception as e:
+#         return jsonify({'error': str(e)}), 500
+
+def get_hyponyms_recursively(synset, levels):
+    """Get hyponyms up to a specified number of levels."""
+    if levels == 0:
+        return set()
+
+    hyponyms = set(synset.hyponyms())
+    for hyponym in list(hyponyms):
+        hyponyms.update(get_hyponyms_recursively(hyponym, levels - 1))
+
+    return hyponyms
+
+def filter_relevant_words(synsets, tag_list, levels, word, threshold=0.5):
+    """Filter relevant words based on synsets, conceptual containment, and semantic proximity."""
+    related_words = set()
+
+    for synset in synsets:
+        print(f"Processing synset: {synset.name()}")
+        print(f"Lemmas: {[lemma.name() for lemma in synset.lemmas()]}")
+
+        # Incluir sinónimos
+        related_words.update([lemma.name() for lemma in synset.lemmas()])
+
+        # Incluir hipónimos hasta el nivel especificado
+        hyponyms = get_hyponyms_recursively(synset, levels)
+        for hyponym in hyponyms:
+            print(f"Hyponym: {hyponym.name()} Lemmas: {[lemma.name() for lemma in hyponym.lemmas()]}")
+            related_words.update([lemma.name() for lemma in hyponym.lemmas()])
+
+    # Filtrar las palabras relacionadas que estén en la lista de tags proporcionada
+    if tag_list:
+        related_words = set(tag_list) & related_words
+
+    return list(related_words)
+
+
+@app.route('/get_semantically_contained_words', methods=['POST'])
+def get_related_words():
+    try:
+        # Parsear el JSON de la solicitud
+        data = request.json
+        word = preprocess_text(data.get('word', ''))
+        tag_list = [preprocess_text(tag) for tag in data.get('tag_list', [])]
+        num_results = data.get('num_results', 10)  # Por defecto, 10 resultados
+        levels = data.get('levels', 1)  # Por defecto, 1 nivel de profundidad
+        threshold = data.get('threshold', 0.5)  # Por defecto, umbral 0.5
+
+        if not word:
+            return jsonify({'error': 'Por favor, proporciona un parámetro word'}), 400
+
+        # Usar WordNet para encontrar palabras relacionadas
+        synsets = wordnet.synsets(word)
+        related_words = filter_relevant_words(synsets, tag_list, levels, word, threshold)
+
+        if not related_words:
+            return jsonify({'word': word, 'related_words': []})
+
+        # Limitar el número de resultados
+        related_words = related_words[:num_results]
+
+        return jsonify({'word': word, 'related_words': related_words})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/get_semantic_explosion', methods=['POST'])
+def get_semantic_explosion():
+    try:
+        # Parsear el JSON de la solicitud
+        data = request.json
+        word = preprocess_text(data.get('word'))
+        tag_list = [preprocess_text(tag) for tag in data.get('tag_list', [])]
+        num_results = data.get('num_results', 10)  # Por defecto, 10 resultados
+        threshold_percent = data.get('threshold', 50)  # Por defecto, umbral 50%
+
+        if not word:
+            return jsonify({'error': 'Por favor, proporciona un parámetro word'}), 400
+
+        # Convertir el umbral de porcentaje a valor de similitud (0 a 1)
+        threshold = threshold_percent / 100.0
+
+        if tag_list:
+            # Obtener embeddings para la palabra y la lista de tags
+            word_embedding = embeddings_model.encode(word, convert_to_tensor=True)
+            tag_list_embeddings = embeddings_model.encode(tag_list, convert_to_tensor=True)
+
+            # Calcular similitudes de coseno
+            similarities = util.cos_sim(word_embedding, tag_list_embeddings)
+
+            # Filtrar la tag_list por proximidad semántica
+            filtered_tag_list = [
+                tag for tag, similarity in zip(tag_list, similarities[0])
+                if float(similarity) >= threshold
+            ]
+
+            # Limitar el número de resultados
+            filtered_tag_list = filtered_tag_list[:num_results]
+
+            return jsonify({'word': word, 'semantic_tags': filtered_tag_list})
+        else:
+            # Usar WordNet para encontrar palabras relacionadas en todas direcciones
+            synsets = wordnet.synsets(word)
+            related_words = set()
+
+            for synset in synsets:
+                # Incluir sinónimos e hipónimos
+                related_words.update([lemma.name() for lemma in synset.lemmas()])
+                related_words.update([lemma.name() for hyponym in synset.hyponyms() for lemma in hyponym.lemmas()])
+
+                # Incluir hiperónimos
+                related_words.update([lemma.name() for hypernym in synset.hypernyms() for lemma in hypernym.lemmas()])
+
+            # Limitar el número de resultados
+            related_words = list(related_words)[:num_results]
+
+            return jsonify({'word': word, 'semantic_explosion': related_words})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    
 def extract_keywords(text, relevance_threshold=0.2):
     """
     Extract keywords based on context and importance.
@@ -434,6 +618,57 @@ def extract_keywords(text, relevance_threshold=0.2):
 
     return relevant_keywords
 
+def obtener_id_wikidata(termino):
+    """
+    Función para obtener el ID de Wikidata de un término dado.
+    """
+    consulta = f"""
+    SELECT ?item WHERE {{
+      ?item rdfs:label "{termino}"@es.
+    }}
+    LIMIT 1
+    """
+    sparql.setQuery(consulta)
+    resultados = sparql.query().convert()
+    items = resultados.get("results", {}).get("bindings", [])
+    if items:
+        return items[0]["item"]["value"].split("/")[-1]
+    return None
+
+def es_subclase(subclase_id, superclase_id):
+    """
+    Función que verifica si una entidad es subclase de otra en Wikidata.
+    """
+    consulta = f"""
+    ASK {{
+      wd:{subclase_id} wdt:P279* wd:{superclase_id}.
+    }}
+    """
+    sparql.setQuery(consulta)
+    resultado = sparql.query().convert()
+    return resultado.get('boolean', False)
+
+@app.route('/check', methods=['POST'])
+def check_relation():
+    data = request.get_json()
+    word1 = data.get('word1')
+    word2 = data.get('word2')
+
+    if not word1 or not word2:
+        return jsonify({"error": "Se requieren 'word1' y 'word2'."}), 400
+
+    # Obtener los IDs de Wikidata para las palabras proporcionadas
+    word1_id = obtener_id_wikidata(word1)
+    word2_id = obtener_id_wikidata(word2)
+
+    if not word1_id or not word2_id:
+        return jsonify({"error": "No se encontraron IDs de Wikidata para las palabras proporcionadas."}), 404
+
+    # Verificar si word2 es una subclase de word1
+    resultado = es_subclase(word2_id, word1_id)
+
+    return jsonify({"result": resultado})
+
 
 
 if __name__ == "__main__":
@@ -442,8 +677,12 @@ if __name__ == "__main__":
 
     # Cargar modelos
     embeddings_model, lemmatizer, spacy_model = load_embeddings_model()
+    load_wordnet()
     similarity_cache = {}
-    processor, model = load_blip_model()
-    clip_processor, clip_model = load_clip_model()
+    # processor, model = load_blip_model()
+    # clip_processor, clip_model = load_clip_model()
+
+    sparql = SPARQLWrapper("https://query.wikidata.org/sparql")
+    sparql.setReturnFormat(JSON)
 
     app.run(host="0.0.0.0", port=5000)
