@@ -19,6 +19,7 @@ import nltk
 import spacy
 import hashlib
 from nltk.corpus import wordnet
+from functools import lru_cache
 
 app = Flask(__name__)
 
@@ -618,57 +619,75 @@ def extract_keywords(text, relevance_threshold=0.2):
 
     return relevant_keywords
 
-def obtener_id_wikidata(termino):
+@lru_cache(maxsize=10000)  # Cachea hasta 10,000 resultados
+def verificar_subclase(subclase_qid, superclase_qid):
     """
-    Función para obtener el ID de Wikidata de un término dado.
-    """
-    consulta = f"""
-    SELECT ?item WHERE {{
-      ?item rdfs:label "{termino}"@es.
-    }}
-    LIMIT 1
-    """
-    sparql.setQuery(consulta)
-    resultados = sparql.query().convert()
-    items = resultados.get("results", {}).get("bindings", [])
-    if items:
-        return items[0]["item"]["value"].split("/")[-1]
-    return None
-
-def es_subclase(subclase_id, superclase_id):
-    """
-    Función que verifica si una entidad es subclase de otra en Wikidata.
+    Verifica si un QID es subclase de otro usando una consulta ASK.
+    Los resultados se cachean para evitar consultas repetidas.
     """
     consulta = f"""
     ASK {{
-      wd:{subclase_id} wdt:P279* wd:{superclase_id}.
+      wd:{subclase_qid} wdt:P279* wd:{superclase_qid}.
     }}
     """
-    sparql.setQuery(consulta)
-    resultado = sparql.query().convert()
-    return resultado.get('boolean', False)
+    try:
+        sparql.setQuery(consulta)
+        sparql.setReturnFormat(JSON)
+        resultado = sparql.query().convert()
+        return resultado.get('boolean', False)
+    except Exception as e:
+        print(f"Error en la consulta SPARQL: {e}")
+        return False
+
+def obtener_qid(tag_name, lang="en"):
+    """
+    Obtiene el QID de un tag dado su nombre.
+    """
+    consulta = f"""
+    SELECT ?item WHERE {{
+      ?item rdfs:label "{tag_name}"@{lang}.
+    }}
+    LIMIT 1
+    """
+    try:
+        sparql.setQuery(consulta)
+        sparql.setReturnFormat(JSON)
+        resultados = sparql.query().convert()
+        bindings = resultados.get("results", {}).get("bindings", [])
+        if bindings:
+            return bindings[0]["item"]["value"].split("/")[-1]
+    except Exception as e:
+        print(f"Error al obtener QID para '{tag_name}': {e}")
+    return None
 
 @app.route('/check', methods=['POST'])
 def check_relation():
     data = request.get_json()
-    word1 = data.get('word1')
-    word2 = data.get('word2')
+    tag_principal_name = data.get('tag_principal')
+    tags = data.get('tags')
 
-    if not word1 or not word2:
-        return jsonify({"error": "Se requieren 'word1' y 'word2'."}), 400
+    if not tag_principal_name or not tags:
+        return jsonify({"error": "Se requieren 'tag_principal' y 'tags'."}), 400
 
-    # Obtener los IDs de Wikidata para las palabras proporcionadas
-    word1_id = obtener_id_wikidata(word1)
-    word2_id = obtener_id_wikidata(word2)
+    # Obtener el QID del tag principal
+    tag_principal_qid = obtener_qid(tag_principal_name)
+    print(f"QID del tag principal '{tag_principal_name}': {tag_principal_qid}")
+    if not tag_principal_qid:
+        return jsonify({"error": f"No se encontró QID para el tag principal '{tag_principal_name}'."}), 404
 
-    if not word1_id or not word2_id:
-        return jsonify({"error": "No se encontraron IDs de Wikidata para las palabras proporcionadas."}), 404
+    resultados = {}
+    for tag_name in tags:
+        tag_qid = obtener_qid(tag_name)
+        print(f"QID de '{tag_name}': {tag_qid}")
+        if not tag_qid:
+            resultados[tag_name] = "No se encontró QID"
+            continue
 
-    # Verificar si word2 es una subclase de word1
-    resultado = es_subclase(word2_id, word1_id)
+        es_subclase = verificar_subclase(tag_qid, tag_principal_qid)
+        print(f"¿'{tag_name}' es subclase de '{tag_principal_name}'? {es_subclase}")
+        resultados[tag_name] = es_subclase
 
-    return jsonify({"result": resultado})
-
+    return jsonify(resultados)
 
 
 if __name__ == "__main__":
