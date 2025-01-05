@@ -660,34 +660,90 @@ def obtener_qid(tag_name, lang="en"):
         print(f"Error al obtener QID para '{tag_name}': {e}")
     return None
 
-@app.route('/check', methods=['POST'])
-def check_relation():
-    data = request.get_json()
-    tag_principal_name = data.get('tag_principal')
-    tags = data.get('tags')
+@app.route('/get_synonym_tags', methods=['POST'])
+def get_synonym_tags():
+    try:
+        data = request.get_json()
+        tag = preprocess_text(data.get('tag', ''))
+        tag_list = [preprocess_text(t) for t in data.get('tag_list', [])]
+        proximity_threshold = float(data.get('proximity_threshold', 0.9))  # Default semantic proximity threshold
+        apply_semantic_proximity = data.get('apply_semantic_proximity', False)  # Whether to apply semantic proximity
 
-    if not tag_principal_name or not tags:
-        return jsonify({"error": "Se requieren 'tag_principal' y 'tags'."}), 400
+        if not tag or not tag_list:
+            return jsonify({"error": "Both 'tag' and 'tag_list' are required."}), 400
 
-    # Obtener el QID del tag principal
-    tag_principal_qid = obtener_qid(tag_principal_name)
-    print(f"QID del tag principal '{tag_principal_name}': {tag_principal_qid}")
-    if not tag_principal_qid:
-        return jsonify({"error": f"No se encontró QID para el tag principal '{tag_principal_name}'."}), 404
+        # Basic preprocessing: lemmatize nouns, verbs, and adjectives, keeping particles
+        def preprocess_for_synonym_matching(text):
+            tokens = spacy_model(text)
+            processed_tokens = [
+                lemmatizer.lemmatize(token.text) if token.pos_ in {"NOUN", "VERB", "ADJ"} else token.text
+                for token in tokens
+            ]
+            return " ".join(processed_tokens)
 
-    resultados = {}
-    for tag_name in tags:
-        tag_qid = obtener_qid(tag_name)
-        print(f"QID de '{tag_name}': {tag_qid}")
-        if not tag_qid:
-            resultados[tag_name] = "No se encontró QID"
-            continue
+        processed_tag = preprocess_for_synonym_matching(tag)
+        processed_tag_list = [preprocess_for_synonym_matching(t) for t in tag_list]
 
-        es_subclase = verificar_subclase(tag_qid, tag_principal_qid)
-        print(f"¿'{tag_name}' es subclase de '{tag_principal_name}'? {es_subclase}")
-        resultados[tag_name] = es_subclase
+        # Strict lexical matches: Match only exact lemmatized phrases
+        lexical_matches = [
+            original_tag for original_tag, processed_tag_item in zip(tag_list, processed_tag_list)
+            if processed_tag == processed_tag_item
+        ]
 
-    return jsonify(resultados)
+        # Apply semantic proximity (optional)
+        semantic_matches = []
+        if apply_semantic_proximity:
+            tag_embedding = embeddings_model.encode(processed_tag, convert_to_tensor=True)
+            tag_list_embeddings = embeddings_model.encode(processed_tag_list, convert_to_tensor=True)
+
+            similarities = util.cos_sim(tag_embedding, tag_list_embeddings)
+
+            # Filter by threshold
+            semantic_matches = [
+                original_tag for original_tag, similarity in zip(tag_list, similarities[0])
+                if float(similarity) >= proximity_threshold
+            ]
+
+        # Combine results
+        combined_matches = lexical_matches if not apply_semantic_proximity else list(set(lexical_matches + semantic_matches))
+
+        return jsonify({
+            "tag": tag,
+            "matches": combined_matches
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# @app.route('/check', methods=['POST'])
+# def check_relation():
+#     data = request.get_json()
+#     tag_principal_name = data.get('tag_principal')
+#     tags = data.get('tags')
+
+#     if not tag_principal_name or not tags:
+#         return jsonify({"error": "Se requieren 'tag_principal' y 'tags'."}), 400
+
+#     # Obtener el QID del tag principal
+#     tag_principal_qid = obtener_qid(tag_principal_name)
+#     print(f"QID del tag principal '{tag_principal_name}': {tag_principal_qid}")
+#     if not tag_principal_qid:
+#         return jsonify({"error": f"No se encontró QID para el tag principal '{tag_principal_name}'."}), 404
+
+#     resultados = {}
+#     for tag_name in tags:
+#         tag_qid = obtener_qid(tag_name)
+#         print(f"QID de '{tag_name}': {tag_qid}")
+#         if not tag_qid:
+#             resultados[tag_name] = "No se encontró QID"
+#             continue
+
+#         es_subclase = verificar_subclase(tag_qid, tag_principal_qid)
+#         print(f"¿'{tag_name}' es subclase de '{tag_principal_name}'? {es_subclase}")
+#         resultados[tag_name] = es_subclase
+
+#     return jsonify(resultados)
 
 
 if __name__ == "__main__":
