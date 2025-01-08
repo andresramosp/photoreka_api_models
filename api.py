@@ -6,6 +6,7 @@ from nltk.stem import WordNetLemmatizer
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import TfidfVectorizer
 from SPARQLWrapper import SPARQLWrapper, JSON
+from asgiref.wsgi import WsgiToAsgi
 from dotenv import load_dotenv
 import torch
 import cv2
@@ -291,6 +292,50 @@ def preprocess_text(text):
     if len(normalized_text.split()) == 1:  # Apply lemmatization only for single words
         return lemmatizer.lemmatize(normalized_text)
     return normalized_text
+
+@app.route('/semantic_proximity_chunks', methods=['POST'])
+def semantic_proximity_chunks():
+    try:
+        # Parse request data
+        data = request.get_json()
+        text1 = data.get('text1')
+        text2 = data.get('text2')
+        chunk_size = int(data.get('chunk_size', 100))
+
+        if not text1 or not text2:
+            return jsonify({"error": "Both 'text1' and 'text2' are required."}), 400
+
+        # Split text2 into chunks by sentences while respecting chunk_size
+        sentences = text2.split('. ')
+        chunks = []
+        current_chunk = ""
+
+        for sentence in sentences:
+            if len(current_chunk) + len(sentence) + 1 <= chunk_size:
+                current_chunk += (sentence + ". ")
+            else:
+                chunks.append(current_chunk.strip())
+                current_chunk = sentence + ". "
+
+        if current_chunk:
+            chunks.append(current_chunk.strip())
+
+        # Encode text1 and chunks
+        text1_embedding = embeddings_model.encode(text1, convert_to_tensor=True)
+        chunk_embeddings = embeddings_model.encode(chunks, convert_to_tensor=True)
+
+        # Calculate semantic proximity for each chunk
+        proximities = util.cos_sim(text1_embedding, chunk_embeddings)[0]
+
+        # Create response with chunk and proximity
+        response = [
+            {"text_chunk": chunk, "proximity": round(float(proximity), 4)}
+            for chunk, proximity in zip(chunks, proximities)
+        ]
+
+        return jsonify(response)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/semantic_proximity', methods=['POST'])
 def calculate_semantic_proximity():
@@ -716,6 +761,64 @@ def get_synonym_tags():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/get_advanced_synonym_tags', methods=['POST'])
+async def get_advanced_synonym_tags():
+    try:
+        data = request.get_json()
+        tag = preprocess_for_synonym_matching(data.get('tag', ''))
+        tag_list = data.get('tag_list', [])
+        proximity_threshold = float(data.get('proximity_threshold', 0.9))  # Default threshold is 0.9
+
+        if not tag or not tag_list:
+            return jsonify({"error": "Both 'tag' and 'tag_list' are required."}), 400
+
+        # # Extract relevant words (nouns, adjectives, verbs) from the main tag
+        # tag_doc = spacy_model(tag)
+        # tag_words = {
+        #     token.text.lower() for token in tag_doc
+        #     if token.pos_ in {"NOUN", "VERB", "ADJ"}
+        # }
+
+        # # Filter the tag list based on relevance
+        # filtered_tags = []
+        # for candidate_tag in tag_list:
+        #     candidate_doc = spacy_model(candidate_tag)
+        #     candidate_words = {
+        #         token.text.lower() for token in candidate_doc
+        #         if token.pos_ in {"NOUN", "VERB", "ADJ"}
+        #     }
+
+        #     # Check if at least half of the main tag's words are in the candidate tag
+        #     if len(tag_words & candidate_words) >= max(1, len(tag_words) / 2):
+        #         filtered_tags.append(candidate_tag)
+
+        # # If no tags pass the initial filtering, return an empty result
+        # if not filtered_tags:
+        #     return jsonify({
+        #         "tag": tag,
+        #         "similar_tags": []
+        #     })
+
+        # Apply semantic proximity on filtered tags
+        tag_embedding = embeddings_model.encode(tag, convert_to_tensor=True)
+        filtered_tag_embeddings = embeddings_model.encode(tag_list, convert_to_tensor=True)
+
+        similarities = util.cos_sim(tag_embedding, filtered_tag_embeddings)
+
+        # Filter tags by proximity threshold
+        similar_tags = [
+            candidate_tag for candidate_tag, similarity in zip(tag_list, similarities[0])
+            if float(similarity) >= proximity_threshold
+        ]
+
+        return jsonify({
+            "tag": tag,
+            "matches": similar_tags
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 
 # @app.route('/check', methods=['POST'])
@@ -762,4 +865,9 @@ if __name__ == "__main__":
     sparql = SPARQLWrapper("https://query.wikidata.org/sparql")
     sparql.setReturnFormat(JSON)
 
-    app.run(host="0.0.0.0", port=5000)
+    # app.run(host="0.0.0.0", port=5000)
+     # Convert Flask app to ASGI
+    asgi_app = WsgiToAsgi(app)
+
+    import uvicorn
+    uvicorn.run(asgi_app, host="0.0.0.0", port=5000)
