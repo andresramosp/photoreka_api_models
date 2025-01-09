@@ -850,6 +850,29 @@ async def get_advanced_synonym_tags():
 
 #     return jsonify(resultados)
 
+@app.route('/get_embeddings', methods=['POST'])
+def get_embeddings():
+    try:
+        # Parsear el JSON de la solicitud
+        data = request.get_json()
+        tags = data.get('tags', [])
+
+        if not tags or not isinstance(tags, list):
+            return jsonify({"error": "Se requiere una lista de palabras en el campo 'tags'."}), 400
+
+        # Generar los embeddings para las palabras
+        embeddings = embeddings_model.encode(tags, convert_to_tensor=False)
+
+        # Crear respuesta con las palabras y sus embeddings
+        response = {
+            "tags": tags,
+            "embeddings": [embedding.tolist() for embedding in embeddings]
+        }
+
+        return jsonify(response)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == "__main__":
     # Limpiar caché si es necesario
