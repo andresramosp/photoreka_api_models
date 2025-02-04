@@ -21,6 +21,7 @@ import spacy
 import hashlib
 from nltk.corpus import wordnet
 from functools import lru_cache
+from transformers import pipeline
 
 app = Flask(__name__)
 
@@ -36,10 +37,13 @@ def clear_cache():
 
 def load_embeddings_model():
     nltk.download('wordnet') 
-    model = SentenceTransformer('all-MiniLM-L6-v2')
+    model = SentenceTransformer('all-mpnet-base-v2')
+    # model = SentenceTransformer('all-MiniLM-L6-v2')
     lemmatizer = WordNetLemmatizer()
     spacy_model = spacy.load("en_core_web_sm")  # Load a small English NLP model
-    return model, lemmatizer, spacy_model
+    deberta_classifier = pipeline("text-classification", model="MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli") #roberta-large-mnli
+    roberta_classifier = pipeline("text-classification", model="roberta-large-mnli") #roberta-large-mnli
+    return model, lemmatizer, spacy_model, deberta_classifier, roberta_classifier
 
 
 def load_wordnet():
@@ -337,6 +341,55 @@ def semantic_proximity_chunks():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+@app.route('/semantic_proximity_chunks_normalized', methods=['POST'])
+def semantic_proximity_chunks_normalized():
+    try:
+        # Parse request data
+        data = request.get_json()
+        text1 = data.get('text1')
+        text2 = data.get('text2')
+        chunk_size = int(data.get('chunk_size', 100))
+
+        if not text1 or not text2:
+            return jsonify({"error": "Both 'text1' and 'text2' are required."}), 400
+
+        # Split text2 into chunks by sentences while respecting chunk_size
+        sentences = text2.split('. ')
+        chunks = []
+        current_chunk = ""
+
+        for sentence in sentences:
+            if len(current_chunk) + len(sentence) + 1 <= chunk_size:
+                current_chunk += (sentence + ". ")
+            else:
+                chunks.append(current_chunk.strip())
+                current_chunk = sentence + ". "
+
+        if current_chunk:
+            chunks.append(current_chunk.strip())
+
+        # Encode text1 and chunks
+        text1_embedding = embeddings_model.encode(text1, convert_to_tensor=True)
+        chunk_embeddings = embeddings_model.encode(chunks, convert_to_tensor=True)
+
+        # Calculate semantic proximity (negative Euclidean distance)
+        proximities = util.euclidean_sim(text1_embedding, chunk_embeddings)[0]
+
+        # Normalize proximity to a 0-1 scale
+        normalized_proximities = [1 / (1 + abs(float(proximity))) for proximity in proximities]
+
+        # Create response with chunk and normalized proximity
+        response = [
+            {"text_chunk": chunk, "proximity": round(proximity, 4)}
+            for chunk, proximity in zip(chunks, normalized_proximities)
+        ]
+
+        return jsonify(response)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/semantic_proximity', methods=['POST'])
 def calculate_semantic_proximity():
     try:
@@ -410,6 +463,7 @@ def generate_tags():
         data = request.get_json()
         description = data.get('description')
         custom_tags = data.get('custom_tags', [])
+        top_n = data.get('top_n', 10)
 
         if not description:
             return jsonify({"error": "Description is required"}), 400
@@ -418,7 +472,7 @@ def generate_tags():
         description_embedding = embeddings_model.encode(description, convert_to_tensor=True)
 
         # Extract candidate tags from the description
-        keywords = extract_keywords(description)
+        keywords = extract_unusual_terms(text=description, top_n=top_n)
 
         # Match keywords to custom tags if provided
         matched_tags = {}
@@ -633,36 +687,151 @@ def get_semantic_explosion():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     
-def extract_keywords(text, relevance_threshold=0.2):
+
+def extract_unusual_terms(text, top_n=10):
     """
-    Extract keywords based on context and importance.
-    :param text: The input text.
-    :param relevance_threshold: Threshold to filter relevant words (0 to 1).
-    :return: A list of relevant keywords.
+    Extrae los términos más inusuales basados en su distancia al vector del texto completo.
+    :param text: Texto de entrada.
+    :param top_n: Número de términos más inusuales a devolver.
+    :return: Lista de términos inusuales ordenados por distancia al texto.
     """
-    doc = spacy_model(text)
+    print("=== Iniciando extracción de términos inusuales ===")
+    print(f"Texto de entrada: {text}")
 
-    # Extract candidate keywords: nouns, proper nouns, and entities
-    keywords = []
-    for token in doc:
-        if token.pos_ in {"NOUN", "PROPN"} or token.ent_type_:  # Includes entities
-            keywords.append(token.text.lower())
-
-    # Remove duplicates and encode in batch
-    unique_keywords = list(set(keywords))
-    keyword_embeddings = embeddings_model.encode(unique_keywords, convert_to_tensor=True)
-
-    # Encode the full text and calculate relevance
+    # Generar el embedding del texto completo
     text_embedding = embeddings_model.encode(text, convert_to_tensor=True)
-    similarities = util.cos_sim(keyword_embeddings, text_embedding)
+    print("Embedding del texto completo calculado.")
 
-    # Filter keywords based on relevance threshold
-    relevant_keywords = [
-        keyword for keyword, similarity in zip(unique_keywords, similarities[:, 0])
-        if float(similarity) >= relevance_threshold
-    ]
+    # Analizar el texto con spaCy
+    doc = spacy_model(text)
+    terms = []
 
-    return relevant_keywords
+    # Extraer nombres simples, nombres con adjetivos y sujeto + acción + objeto
+    for token in doc:
+        # 1. Nombres simples y con adjetivos
+        if token.pos_ in {"NOUN", "PROPN"}:
+            base_noun = token.text.lower()
+            adj = [child.text.lower() for child in token.children if child.dep_ == "amod"]
+
+            if adj:
+                enriched_noun = f"{' '.join(adj)} {base_noun}"
+                terms.append(enriched_noun)
+            else:
+                terms.append(base_noun)
+
+        # 2. Sujeto + Acción + Objeto
+        if token.dep_ == "ROOT":  # Verbo principal
+            subject = [child.text.lower() for child in token.children if child.dep_ in {"nsubj", "nsubjpass"}]
+            obj = [child.text.lower() for child in token.children if child.dep_ in {"dobj", "obj"}]
+            obj_adj = [f"{' '.join([c.text.lower() for c in obj_child.children if c.dep_ == 'amod'])} {obj_token.text.lower()}"
+                       for obj_token in token.children if obj_token.dep_ in {"dobj", "obj"}
+                       for obj_child in obj_token.children if obj_child.dep_ == "amod"]
+
+            if subject and (obj or obj_adj):
+                action_phrase = f"{' '.join(subject)} {token.text.lower()} {' '.join(obj_adj or obj)}"
+                terms.append(action_phrase)
+
+    # Eliminar duplicados
+    unique_terms = list(set(terms))
+    print(f"Términos extraídos (sin duplicados): {unique_terms}")
+
+    # Generar embeddings para los términos
+    term_embeddings = embeddings_model.encode(unique_terms, convert_to_tensor=True)
+
+    # Calcular distancias al texto completo
+    distances = []
+    for term, term_embedding in zip(unique_terms, term_embeddings):
+        similarity = util.cos_sim(term_embedding, text_embedding).item()
+        distance = 1 - similarity  # La distancia es el inverso de la similitud
+        distances.append((term, distance))
+        print(f"Term '{term}' tiene distancia {distance:.2f} respecto al texto completo")
+
+    # Ordenar términos por distancia (de mayor a menor)
+    distances.sort(key=lambda x: x[1], reverse=True)
+
+    # Seleccionar los términos más inusuales
+    most_unusual_terms = [term for term, _ in distances[:top_n]]
+    print(f"Términos más inusuales: {most_unusual_terms}")
+    print("=== Extracción completada ===")
+
+    return most_unusual_terms
+
+
+def extract_keywords_with_centroid_groups(text, relevance_threshold=0.2, centroid_groups=None):
+    """
+    Extrae palabras clave limitadas a nombres simples, nombres con adjetivos, y sujeto + acción + objeto,
+    cotejándolos contra grupos de centroides. Un término entra si cumple el umbral para cualquier grupo.
+    :param text: Texto de entrada.
+    :param relevance_threshold: Umbral mínimo de relevancia respecto a los centroides (0 a 1).
+    :param centroid_groups: Diccionario de grupos de centroides (nombre del grupo -> lista de términos clave).
+    :return: Diccionario de grupos con las palabras clave relevantes para cada uno.
+    """
+    if centroid_groups is None or not isinstance(centroid_groups, dict) or not centroid_groups:
+        raise ValueError("Se necesita un diccionario de centroid_groups para definir los grupos de centroides.")
+
+    print("=== Iniciando extracción de keywords con grupos de centroides ===")
+    print(f"Texto de entrada: {text}")
+    print(f"Grupos de centroides: {list(centroid_groups.keys())}")
+
+    # Generar centroides para cada grupo
+    group_centroids = {}
+    for group_name, terms in centroid_groups.items():
+        embeddings = embeddings_model.encode(terms, convert_to_tensor=True)
+        group_centroids[group_name] = embeddings.mean(axis=0)
+    print("Centroides de grupos calculados.")
+
+    # Analizar el texto con spaCy
+    doc = spacy_model(text)
+    keywords = {}
+    phrases = []
+
+    # Extraer nombres simples, nombres con adjetivos y sujeto + acción + objeto
+    for token in doc:
+        # 1. Nombres simples y con adjetivos
+        if token.pos_ in {"NOUN", "PROPN"}:
+            base_noun = token.text.lower()
+            adj = [child.text.lower() for child in token.children if child.dep_ == "amod"]
+
+            if adj:
+                enriched_noun = f"{' '.join(adj)} {base_noun}"
+                # Priorizar la versión enriquecida
+                keywords[base_noun] = enriched_noun
+            else:
+                # Solo añadir la versión simple si no existe una enriquecida
+                if base_noun not in keywords:
+                    keywords[base_noun] = base_noun
+
+        # 2. Sujeto + Acción + Objeto
+        if token.dep_ == "ROOT":  # Verbo principal
+            subject = [child.text.lower() for child in token.children if child.dep_ in {"nsubj", "nsubjpass"}]
+            obj = [child.text.lower() for child in token.children if child.dep_ in {"dobj", "obj"}]
+            obj_adj = [f"{' '.join([c.text.lower() for c in obj_child.children if c.dep_ == 'amod'])} {obj_token.text.lower()}"
+                       for obj_token in token.children if obj_token.dep_ in {"dobj", "obj"}
+                       for obj_child in obj_token.children if obj_child.dep_ == "amod"]
+
+            if subject and (obj or obj_adj):
+                action_phrase = f"{' '.join(subject)} {token.text.lower()} {' '.join(obj_adj or obj)}"
+                phrases.append(action_phrase)
+
+    # Unificar las keywords y las frases
+    unique_keywords = list(set(keywords.values()) | set(phrases))
+    print(f"Keywords extraídas (sin duplicados): {unique_keywords}")
+
+    # Generar embeddings para palabras clave y frases
+    term_embeddings = embeddings_model.encode(unique_keywords, convert_to_tensor=True)
+
+    # Evaluar similitud con cada grupo de centroides
+    group_results = {group_name: [] for group_name in centroid_groups}
+    for term, term_embedding in zip(unique_keywords, term_embeddings):
+        for group_name, centroid_embedding in group_centroids.items():
+            similarity = util.cos_sim(term_embedding, centroid_embedding).item()
+            if similarity >= relevance_threshold:
+                print(f"Term '{term}' tiene similitud {similarity:.2f} con el centroide del grupo '{group_name}'")
+                group_results[group_name].append(term)
+
+    print(f"Resultados finales por grupo: {group_results}")
+    print("=== Extracción completada ===")
+    return group_results
 
 @lru_cache(maxsize=10000)  # Cachea hasta 10,000 resultados
 def verificar_subclase(subclase_qid, superclase_qid):
@@ -873,13 +1042,188 @@ def get_embeddings():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+def adjust_similarity(term1, term2, similarity_score):
+    """
+    Ajusta la similitud entre dos términos en función de su relación semántica.
+    - Reduce la similitud si el modelo detecta contradicción.
+    - Refuerza la similitud si detecta implicación.
+    - Mantiene la similitud si es neutral.
+    """
+    result = roberta_classifier(f"{term1} entails {term2}")
+    label = result[0]['label']
+
+    if label == "CONTRADICTION":
+        return similarity_score * 0.5  # Penalizar similitud
+    elif label == "ENTAILMENT":
+        return similarity_score * 1.1  # Reforzar similitud
+    return similarity_score  # Mantener igual si es neutral
+
+@app.route('/roberta', methods=['POST'])
+def roberta():
+    try:
+        # Recibir datos JSON con los términos y la similitud base
+        data = request.json
+        term1 = data.get("term1")
+        term2 = data.get("term2")
+        similarity_score = float(data.get("similarity_score", 1.0))  # Por defecto 1.0
+
+        if not term1 or not term2:
+            return jsonify({"error": "Both term1 and term2 are required"}), 400
+
+        # Ajustar la similitud según Roberta
+        adjusted_score = adjust_similarity(term1, term2, similarity_score)
+
+        response = {
+            "term1": term1,
+            "term2": term2,
+            "original_similarity": similarity_score,
+            "adjusted_similarity": adjusted_score
+        }
+
+        return jsonify(response)
+    
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
+
+
+
+RELATIONS = {
+    "entails": "ENTAILMENT",
+    "contradicts": "CONTRADICTION",
+    "is the opposite of": "CONTRADICTION",
+    "implies": "ENTAILMENT",
+    "is a type of": "ENTAILMENT",
+    "is a synonym of": "ENTAILMENT",
+    # "belongs to": "ENTAILMENT",
+    # "is a part of": "ENTAILMENT",
+    "is a more general form of": "CONTRADICTION",
+    "is a": "ENTAILMENT",
+    "implies the presence of": "ENTAILMENT"
+}
+
+def evaluate_relations(term1, term2):
+    """ Evalúa múltiples relaciones semánticas entre dos términos y añade match: true/false. """
+    results = {}
+    
+    for relation, expected_label in RELATIONS.items():
+        phrase = f"{term1} {relation} {term2}"
+        response = roberta_classifier(phrase, truncation=True)[0]
+        
+        # Determinar si hay match (true/false)
+        match = response["label"] == expected_label
+        
+        # Guardar resultados
+        results[relation] = {
+            "label": response["label"],  # ENTALMENT, CONTRADICTION, NEUTRAL
+            "score": round(response["score"], 4),
+            "match": match  # true o false según si coincide con la relación esperada
+        }
+    
+    return results
+
+@app.route('/roberta_all', methods=['POST'])
+def roberta_all():
+    try:
+        data = request.json
+        term1 = data.get("term1")
+        term2 = data.get("term2")
+
+        if not term1 or not term2:
+            return jsonify({"error": "Both term1 and term2 are required"}), 400
+
+        results = evaluate_relations(term1, term2)
+
+        response = {
+            "term1": term1,
+            "term2": term2,
+            "relations": results
+        }
+
+        return jsonify(response)
+    
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+from functools import lru_cache
+
+cache = {}
+
+@app.route('/adjust_proximities_by_context_inference', methods=['POST'])
+def adjust_proximities_by_context_inference():
+    """
+    Ajusta la proximidad de un término a una lista de etiquetas en función de conectores semánticos.
+    """
+    
+    score_threshold = 0.59
+    high_threshold = 0.7
+    min_bonus, max_bonus = 1.4, 1.7
+
+    positive_connectors = ["implies", "implies the presence of", "is a synonym of"]
+    
+    data = request.json
+    term = data.get("term")
+    tag_list = data.get("tag_list")
+    
+    results = {}
+    
+    for tag in tag_list:
+        tag_name = tag["name"]
+        original_proximity = tag["proximity"]
+        valid_positive_scores = []
+        matched_positive_connectors = []
+        matched_negative_connectors = []
+
+        for connector in positive_connectors:
+            cache_key = (tag_name, connector, term)
+            if cache_key in cache:
+                result = cache[cache_key]
+            else:
+                result = roberta_classifier(f"{tag_name} {connector} {term}")
+                cache[cache_key] = result
+
+            label = result[0]['label']
+            score = result[0]['score']
+
+            if score < score_threshold:
+                continue  # Descartar conector con baja confianza
+
+            if label == "ENTAILMENT":
+                valid_positive_scores.append(score)
+                matched_positive_connectors.append(connector)
+                print(f"MATCH! {tag_name} {connector} {term}: label: {label}, score: {score}")
+            elif label == "CONTRADICTION":
+                matched_negative_connectors.append(connector)
+                print(f"CONTRADICT! {tag_name} {connector} {term}: label: {label}, score: {score}")
+
+        if len(valid_positive_scores) >= 2 or (len(valid_positive_scores) == 1 and valid_positive_scores[0] > high_threshold):
+            # Aplicar bonificación solo si hay al menos dos conectores positivos o uno con score > 0.7
+            avg_score = sum(valid_positive_scores) / len(valid_positive_scores)
+            adjustment_factor = min_bonus + (max_bonus - min_bonus) * ((avg_score - score_threshold) / (1 - score_threshold))
+            adjusted_proximity = original_proximity * adjustment_factor
+        elif matched_negative_connectors:
+            # Se detectó una negación → aplicar penalización
+            adjusted_proximity = original_proximity * -1
+        else:
+            # Ningún conector válido → mantener igual
+            adjusted_proximity = original_proximity
+        
+        results[tag_name] = {
+            "original_proximity": original_proximity,
+            "adjusted_proximity": adjusted_proximity,
+            "matched_positive_connectors": matched_positive_connectors,
+            "matched_negative_connectors": matched_negative_connectors
+        }
+    
+    return results
+
 
 if __name__ == "__main__":
     # Limpiar caché si es necesario
     clear_cache()
 
     # Cargar modelos
-    embeddings_model, lemmatizer, spacy_model = load_embeddings_model()
+    embeddings_model, lemmatizer, spacy_model, deberta_classifier, roberta_classifier = load_embeddings_model()
     load_wordnet()
     similarity_cache = {}
     # processor, model = load_blip_model()
