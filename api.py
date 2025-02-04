@@ -1154,27 +1154,33 @@ def adjust_proximities_by_context_inference():
     """
     Ajusta la proximidad de un término a una lista de etiquetas en función de conectores semánticos.
     """
-    
-    score_threshold = 0.59
-    high_threshold = 0.7
-    min_bonus, max_bonus = 1.4, 1.7
 
-    positive_connectors = ["implies", "implies the presence of", "is a synonym of"]
-    
+    # Cada conector tiene su propio umbral (`threshold`) y bonificador (`bonif`)
+    positive_connectors = {
+        "implies": {"threshold": 0.55, "bonif": 1.2},
+        "implies the presence of": {"threshold": 0.5, "bonif": 1.7},
+        "is a synonym of": {"threshold": 0.55, "bonif": 1.3},
+    }
+
     data = request.json
     term = data.get("term")
     tag_list = data.get("tag_list")
-    
+
     results = {}
-    
+
     for tag in tag_list:
         tag_name = tag["name"]
         original_proximity = tag["proximity"]
-        valid_positive_scores = []
-        matched_positive_connectors = []
-        matched_negative_connectors = []
 
-        for connector in positive_connectors:
+        matched_entailment_connectors = []
+        matched_contradiction_connectors = []
+        matched_neutral_connectors = []
+        total_bonus_multiplier = 1.0  # Inicializamos en 1 para multiplicar
+
+        for connector, properties in positive_connectors.items():
+            threshold = properties["threshold"]
+            bonif = properties["bonif"]
+
             cache_key = (tag_name, connector, term)
             if cache_key in cache:
                 result = cache[cache_key]
@@ -1185,37 +1191,45 @@ def adjust_proximities_by_context_inference():
             label = result[0]['label']
             score = result[0]['score']
 
-            if score < score_threshold:
-                continue  # Descartar conector con baja confianza
+            if score < threshold:
+                continue  # Descartar conexiones con baja confianza
 
             if label == "ENTAILMENT":
-                valid_positive_scores.append(score)
-                matched_positive_connectors.append(connector)
-                print(f"MATCH! {tag_name} {connector} {term}: label: {label}, score: {score}")
-            elif label == "CONTRADICTION":
-                matched_negative_connectors.append(connector)
-                print(f"CONTRADICT! {tag_name} {connector} {term}: label: {label}, score: {score}")
+                matched_entailment_connectors.append(connector)
+                total_bonus_multiplier += bonif - 1  # Se suman bonificadores
 
-        if len(valid_positive_scores) >= 2 or (len(valid_positive_scores) == 1 and valid_positive_scores[0] > high_threshold):
-            # Aplicar bonificación solo si hay al menos dos conectores positivos o uno con score > 0.7
-            avg_score = sum(valid_positive_scores) / len(valid_positive_scores)
-            adjustment_factor = min_bonus + (max_bonus - min_bonus) * ((avg_score - score_threshold) / (1 - score_threshold))
-            adjusted_proximity = original_proximity * adjustment_factor
-        elif matched_negative_connectors:
-            # Se detectó una negación → aplicar penalización
-            adjusted_proximity = original_proximity * -1
-        else:
-            # Ningún conector válido → mantener igual
+            elif label == "CONTRADICTION":
+                matched_contradiction_connectors.append(connector)
+
+            else:  # NEUTRAL
+                matched_neutral_connectors.append(connector)
+
+        # 1. Si hay contradicción (ENTAILMENT y CONTRADICTION), mantenemos la proximidad igual
+        if matched_entailment_connectors and matched_contradiction_connectors:
             adjusted_proximity = original_proximity
-        
+
+        # 2. Si todos los conectores son CONTRADICTION o NEUTRAL → aplicar penalización total
+        elif matched_contradiction_connectors and not matched_entailment_connectors:
+            adjusted_proximity = original_proximity * -1
+
+        # 3. Si todos los conectores son ENTAILMENT o NEUTRAL → aplicar bonificación
+        elif matched_entailment_connectors and not matched_contradiction_connectors:
+            adjusted_proximity = original_proximity * total_bonus_multiplier
+
+        # 4. Si no hay conectores válidos, la proximidad se mantiene igual
+        else:
+            adjusted_proximity = original_proximity
+
         results[tag_name] = {
             "original_proximity": original_proximity,
             "adjusted_proximity": adjusted_proximity,
-            "matched_positive_connectors": matched_positive_connectors,
-            "matched_negative_connectors": matched_negative_connectors
+            "matched_positive_connectors": matched_entailment_connectors,
+            "matched_negative_connectors": matched_contradiction_connectors,
+            "matched_neutral_connectors": matched_neutral_connectors
         }
-    
+
     return results
+
 
 
 if __name__ == "__main__":
