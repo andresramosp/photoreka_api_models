@@ -22,6 +22,7 @@ import hashlib
 from nltk.corpus import wordnet
 from functools import lru_cache
 from transformers import pipeline
+from datasets import Dataset
 
 app = Flask(__name__)
 
@@ -36,13 +37,16 @@ def clear_cache():
         print("Caché de Hugging Face eliminada correctamente.")
 
 def load_embeddings_model():
-    nltk.download('wordnet') 
-    model = SentenceTransformer('all-mpnet-base-v2')
+
+    device = 0 if torch.cuda.is_available() else -1  # Usa la GPU si está disponible
+
+    # nltk.download('wordnet') 
+    model = SentenceTransformer('all-mpnet-base-v2', device=device)
     # model = SentenceTransformer('all-MiniLM-L6-v2')
     lemmatizer = WordNetLemmatizer()
     spacy_model = spacy.load("en_core_web_sm")  # Load a small English NLP model
-    deberta_classifier = pipeline("text-classification", model="MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli") #roberta-large-mnli
-    roberta_classifier = pipeline("text-classification", model="roberta-large-mnli") #roberta-large-mnli
+    deberta_classifier = pipeline("text-classification", model="MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli", device=device) #roberta-large-mnli
+    roberta_classifier = pipeline("text-classification", model="roberta-large-mnli", device=device) #roberta-large-mnli
     return model, lemmatizer, spacy_model, deberta_classifier, roberta_classifier
 
 
@@ -1042,48 +1046,6 @@ def get_embeddings():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-def adjust_similarity(term1, term2, similarity_score):
-    """
-    Ajusta la similitud entre dos términos en función de su relación semántica.
-    - Reduce la similitud si el modelo detecta contradicción.
-    - Refuerza la similitud si detecta implicación.
-    - Mantiene la similitud si es neutral.
-    """
-    result = roberta_classifier(f"{term1} entails {term2}")
-    label = result[0]['label']
-
-    if label == "CONTRADICTION":
-        return similarity_score * 0.5  # Penalizar similitud
-    elif label == "ENTAILMENT":
-        return similarity_score * 1.1  # Reforzar similitud
-    return similarity_score  # Mantener igual si es neutral
-
-@app.route('/roberta', methods=['POST'])
-def roberta():
-    try:
-        # Recibir datos JSON con los términos y la similitud base
-        data = request.json
-        term1 = data.get("term1")
-        term2 = data.get("term2")
-        similarity_score = float(data.get("similarity_score", 1.0))  # Por defecto 1.0
-
-        if not term1 or not term2:
-            return jsonify({"error": "Both term1 and term2 are required"}), 400
-
-        # Ajustar la similitud según Roberta
-        adjusted_score = adjust_similarity(term1, term2, similarity_score)
-
-        response = {
-            "term1": term1,
-            "term2": term2,
-            "original_similarity": similarity_score,
-            "adjusted_similarity": adjusted_score
-        }
-
-        return jsonify(response)
-    
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
     
 
 
@@ -1145,92 +1107,122 @@ def roberta_all():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-from functools import lru_cache
-
-cache = {}
 
 @app.route('/adjust_proximities_by_context_inference', methods=['POST'])
-def adjust_proximities_by_context_inference():
+async def adjust_proximities_by_context_inference():
     """
-    Ajusta la proximidad de un término a una lista de etiquetas en función de conectores semánticos.
+    Ajusta la proximidad de un término a una lista de etiquetas en función de conectores semánticos,
+    utilizando RoBERTa o DeBERTa con inferencia en batch.
     """
-
-    # Cada conector tiene su propio umbral (`threshold`) y bonificador (`bonif`)
-    positive_connectors = {
-        "implies": {"threshold": 0.55, "bonif": 1.2},
-        "implies the presence of": {"threshold": 0.5, "bonif": 1.7},
-        "is a synonym of": {"threshold": 0.55, "bonif": 1.3},
-    }
-
+    import time
+    
+    start_time = time.time()
+    BATCH_SIZE = 32
     data = request.json
     term = data.get("term")
     tag_list = data.get("tag_list")
+    model_name = data.get("model", "roberta")  # Modelo por defecto: RoBERTa
+    use_wrapper = data.get("use_wrapper", True)
+    terms_type = data.get("terms_type", "tag")
+    
+    classifier = deberta_classifier if model_name == "deberta" else roberta_classifier
+    phrase_wrapper = "{term} was perceived there" if (use_wrapper and terms_type == "tag") else "{term}"
+    wrapped_term = phrase_wrapper.format(term=term) if term else ""
+    
+    print(f"[INFO] Inicio de procesamiento - Modelo: {model_name}, Termino: {term}, Etiquetas: {len(tag_list)}")
+
+    if terms_type == "tag":
+        positive_connectors = {
+            "implies": {"threshold": 0.55, "bonif": 1.2},
+            "implies the presence of": {"threshold": 0.5, "bonif": 1.7},
+            "is a synonym of": {"threshold": 0.55, "bonif": 1.3}
+        }
+    else:
+        positive_connectors = {
+        # "implies": {"threshold": 0.55, "bonif": 1.2},
+        # "implies the presence of": {"threshold": 0.5, "bonif": 1.7},
+        "entails": {"threshold": 0.55, "bonif": 1.3},
+    }
 
     results = {}
-
+    batch_queries = []
+    batch_metadata = []
+    
+    # Construcción de frases en batch
+    build_start = time.time()
     for tag in tag_list:
-        tag_name = tag["name"]
-        original_proximity = tag["proximity"]
-
-        matched_entailment_connectors = []
-        matched_contradiction_connectors = []
-        matched_neutral_connectors = []
-        total_bonus_multiplier = 1.0  # Inicializamos en 1 para multiplicar
-
-        for connector, properties in positive_connectors.items():
-            threshold = properties["threshold"]
-            bonif = properties["bonif"]
-
-            cache_key = (tag_name, connector, term)
-            if cache_key in cache:
-                result = cache[cache_key]
-            else:
-                result = roberta_classifier(f"{tag_name} {connector} {term}")
-                cache[cache_key] = result
-
-            label = result[0]['label']
-            score = result[0]['score']
-
-            if score < threshold:
-                continue  # Descartar conexiones con baja confianza
-
-            if label == "ENTAILMENT":
-                matched_entailment_connectors.append(connector)
-                total_bonus_multiplier += bonif - 1  # Se suman bonificadores
-
-            elif label == "CONTRADICTION":
-                matched_contradiction_connectors.append(connector)
-
-            else:  # NEUTRAL
-                matched_neutral_connectors.append(connector)
-
-        # 1. Si hay contradicción (ENTAILMENT y CONTRADICTION), mantenemos la proximidad igual
-        if matched_entailment_connectors and matched_contradiction_connectors:
-            adjusted_proximity = original_proximity
-
-        # 2. Si todos los conectores son CONTRADICTION o NEUTRAL → aplicar penalización total
-        elif matched_contradiction_connectors and not matched_entailment_connectors:
-            adjusted_proximity = original_proximity * -1
-
-        # 3. Si todos los conectores son ENTAILMENT o NEUTRAL → aplicar bonificación
-        elif matched_entailment_connectors and not matched_contradiction_connectors:
-            adjusted_proximity = original_proximity * total_bonus_multiplier
-
-        # 4. Si no hay conectores válidos, la proximidad se mantiene igual
+        wrapped_tag = phrase_wrapper.format(term=tag["name"])
+        for connector, props in positive_connectors.items():
+            query = f"{{{wrapped_tag}}} {connector} {{{wrapped_term}}}"
+            batch_queries.append(query)
+            batch_metadata.append((tag["name"], connector, props["threshold"]))
+    print(f"[INFO] Construcción de batch completada en {time.time() - build_start:.4f} segundos. Total queries: {len(batch_queries)}")
+    
+    if not batch_queries:
+        print("[INFO] No hay queries a procesar, terminando ejecución.")
+        return results
+    
+    # 🔥 Inferencia en batch con Dataset de Hugging Face
+    inference_start = time.time()
+    dataset = Dataset.from_dict({"text": batch_queries})  # Creamos un Dataset eficiente
+    batch_results = classifier(dataset["text"], batch_size=BATCH_SIZE)  # Usamos batch correctamente
+    print(f"[INFO] Inferencia completada en {time.time() - inference_start:.4f} segundos.")
+    
+    # Procesamiento de resultados
+    process_start = time.time()
+    processed_results = {}
+    for (tag_name, connector, threshold), result in zip(batch_metadata, batch_results):
+        label = result["label"].lower()
+        score = result["score"]
+        
+        if score < threshold:
+            continue
+        
+        key = f"{tag_name}"
+        
+        if key not in processed_results:
+            processed_results[key] = {
+                "adjusted_proximity": 0,
+                "matched_positive_connectors": [],
+                "matched_negative_connectors": [],
+                "matched_neutral_connectors": [],
+            }
+        
+        # print(f"{{{wrapped_tag}}} {connector} {{{wrapped_term}}}")
+        if label == "entailment":
+            processed_results[key]["matched_positive_connectors"].append((connector, score))
+            print(f"✅ Match encontrado: '{tag_name}' -> {connector} -> '{term}' (Score: {score:.2f})")
+        elif label == "contradiction":
+            processed_results[key]["matched_negative_connectors"].append((connector, score))
+            # print(f"⛔ Contradiction encontrado: '{tag_name}' -> {connector} -> '{term}' (Score: {score:.2f})")
         else:
-            adjusted_proximity = original_proximity
-
-        results[tag_name] = {
-            "original_proximity": original_proximity,
-            "adjusted_proximity": adjusted_proximity,
-            "matched_positive_connectors": matched_entailment_connectors,
-            "matched_negative_connectors": matched_contradiction_connectors,
-            "matched_neutral_connectors": matched_neutral_connectors
-        }
-
+            processed_results[key]["matched_neutral_connectors"].append((connector, score))
+    print(f"[INFO] Procesamiento de resultados completado en {time.time() - process_start:.4f} segundos.")
+    
+    # Ajuste de proximidades
+    adjust_start = time.time()
+    for key, result_data in processed_results.items():
+        entailment = result_data["matched_positive_connectors"]
+        contradiction = result_data["matched_negative_connectors"]
+        
+        if entailment and contradiction:
+            result_data["adjusted_proximity"] = 0
+        elif contradiction:
+            avg_score = sum(s for _, s in contradiction) / len(contradiction)
+            factor = 1 + 0.2 * (len(contradiction) - 1)
+            result_data["adjusted_proximity"] = max(-avg_score * factor, -1)
+        elif entailment:
+            base_score = sum(s for _, s in entailment) / len(entailment)
+            factor = 1 + 0.2 * (len(entailment) - 1)
+            result_data["adjusted_proximity"] = min(base_score * factor, 1)
+        
+        results[key] = result_data
+    print(f"[INFO] Ajuste de proximidades completado en {time.time() - adjust_start:.4f} segundos.")
+    
+    total_time = time.time() - start_time
+    print(f"[INFO] Proceso completo finalizado en {total_time:.4f} segundos.")
+    
     return results
-
-
 
 if __name__ == "__main__":
     # Limpiar caché si es necesario
