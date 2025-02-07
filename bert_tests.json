@@ -1,0 +1,89 @@
+{
+  "test_data": [
+    { "term": "animal", "tag": "dog", "expected": true },
+    { "term": "feline", "tag": "cat", "expected": true },
+    { "term": "white mammal", "tag": "white dog", "expected": true },
+    { "term": "mammal animal", "tag": "Moroccan", "expected": false },
+    {
+      "term": "joyful expressions",
+      "tag": "smiling children",
+      "expected": true
+    },
+    { "term": "sad people", "tag": "crying man", "expected": true },
+    { "term": "happiness", "tag": "laughing woman", "expected": true },
+    { "term": "melancholic faces", "tag": "gloomy crowd", "expected": true },
+    {
+      "term": "cheerful group",
+      "tag": "serious businessman",
+      "expected": false
+    },
+    { "term": "sorrowful mood", "tag": "joyful wedding", "expected": false },
+    { "term": "worried faces", "tag": "anxious mother", "expected": true },
+    {
+      "term": "neutral expression",
+      "tag": "intense crying",
+      "expected": false
+    },
+    { "term": "angry mob", "tag": "riot police", "expected": true },
+    { "term": "calm ocean", "tag": "stormy waves", "expected": false },
+    {
+      "term": "children playing at sunsets",
+      "tag": "a group of kids running on the beach as the sun sets",
+      "expected": true
+    },
+    {
+      "term": "a waiter smoking during a rainy night",
+      "tag": "a man standing under neon lights in the rain, with a cigarette in his hand",
+      "expected": true
+    },
+    {
+      "term": "people with umbrellas, but not dogs around",
+      "tag": "a busy street filled with people holding umbrellas, but no animals in sight",
+      "expected": true
+    },
+    {
+      "term": "a woman waiting at a train station",
+      "tag": "a blurry silhouette of a man rushing to catch a train",
+      "expected": false
+    },
+    {
+      "term": "a musician playing on the street",
+      "tag": "a saxophonist performing in a subway station",
+      "expected": true
+    },
+    {
+      "term": "a tired worker sitting at a bus stop",
+      "tag": "a businessman standing in line at a taxi stand",
+      "expected": false
+    },
+    {
+      "term": "a couple dancing under the moonlight",
+      "tag": "a crowd at a rock concert",
+      "expected": false
+    },
+    {
+      "term": "a fisherman pulling a net full of fish",
+      "tag": "a solitary man looking at the ocean",
+      "expected": false
+    },
+    {
+      "term": "a cat sleeping on a window ledge",
+      "tag": "a cozy room with sunlight streaming in",
+      "expected": false
+    },
+    {
+      "term": "a foggy morning in the mountains",
+      "tag": "a hiking trail covered in dense mist",
+      "expected": true
+    },
+    { "term": "vehicle", "tag": "car", "expected": true },
+    { "term": "car", "tag": "sedan", "expected": true },
+    { "term": "car", "tag": "transportation", "expected": false },
+    { "term": "budget car", "tag": "luxury vehicle", "expected": false },
+    { "term": "technology", "tag": "smartphone", "expected": true },
+    { "term": "smartphone", "tag": "iPhone", "expected": true },
+    { "term": "mobile phone", "tag": "tablet", "expected": false },
+    { "term": "wooden furniture", "tag": "wooden chair", "expected": true },
+    { "term": "red chair", "tag": "wooden chair", "expected": false }
+  ]
+}
