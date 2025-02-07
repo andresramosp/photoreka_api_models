@@ -1126,23 +1126,21 @@ async def adjust_proximities_by_context_inference():
     terms_type = data.get("terms_type", "tag")
     
     classifier = deberta_classifier if model_name == "deberta" else roberta_classifier
-    phrase_wrapper = "{term} was perceived there" if (use_wrapper and terms_type == "tag") else "{term}"
+    phrase_wrapper = "the photo featured a {term}" if (use_wrapper and terms_type == "tag") else "{term}"
     wrapped_term = phrase_wrapper.format(term=term) if term else ""
     
     print(f"[INFO] Inicio de procesamiento - Modelo: {model_name}, Termino: {term}, Etiquetas: {len(tag_list)}")
 
     if terms_type == "tag":
         positive_connectors = {
-            "implies": {"threshold": 0.55, "bonif": 1.2},
+            "implies": {"threshold": 0.7, "bonif": 1.2},
             "implies the presence of": {"threshold": 0.5, "bonif": 1.7},
             "is a synonym of": {"threshold": 0.55, "bonif": 1.3}
         }
     else:
         positive_connectors = {
-        # "implies": {"threshold": 0.55, "bonif": 1.2},
-        # "implies the presence of": {"threshold": 0.5, "bonif": 1.7},
-        "entails": {"threshold": 0.55, "bonif": 1.3},
-    }
+            "entails": {"threshold": 0.55, "bonif": 1.3},
+        }
 
     results = {}
     batch_queries = []
@@ -1175,9 +1173,6 @@ async def adjust_proximities_by_context_inference():
         label = result["label"].lower()
         score = result["score"]
         
-        if score < threshold:
-            continue
-        
         key = f"{tag_name}"
         
         if key not in processed_results:
@@ -1188,15 +1183,14 @@ async def adjust_proximities_by_context_inference():
                 "matched_neutral_connectors": [],
             }
         
-        # print(f"{{{wrapped_tag}}} {connector} {{{wrapped_term}}}")
-        if label == "entailment":
-            processed_results[key]["matched_positive_connectors"].append((connector, score))
-            print(f"✅ Match encontrado: '{tag_name}' -> {connector} -> '{term}' (Score: {score:.2f})")
-        elif label == "contradiction":
-            processed_results[key]["matched_negative_connectors"].append((connector, score))
-            # print(f"⛔ Contradiction encontrado: '{tag_name}' -> {connector} -> '{term}' (Score: {score:.2f})")
-        else:
-            processed_results[key]["matched_neutral_connectors"].append((connector, score))
+        if score >= threshold:
+            if label == "entailment":
+                processed_results[key]["matched_positive_connectors"].append((connector, score))
+                print(f"✅ Match encontrado: '{tag_name}' -> {connector} -> '{term}' (Score: {score:.2f})")
+            elif label == "contradiction":
+                processed_results[key]["matched_negative_connectors"].append((connector, score))
+            else:
+                processed_results[key]["matched_neutral_connectors"].append((connector, score))
     print(f"[INFO] Procesamiento de resultados completado en {time.time() - process_start:.4f} segundos.")
     
     # Ajuste de proximidades
@@ -1215,6 +1209,8 @@ async def adjust_proximities_by_context_inference():
             base_score = sum(s for _, s in entailment) / len(entailment)
             factor = 1 + 0.2 * (len(entailment) - 1)
             result_data["adjusted_proximity"] = min(base_score * factor, 1)
+        else:
+            result_data["adjusted_proximity"] = 0  # Si todo es neutral o no hay datos válidos, se asigna 0
         
         results[key] = result_data
     print(f"[INFO] Ajuste de proximidades completado en {time.time() - adjust_start:.4f} segundos.")
