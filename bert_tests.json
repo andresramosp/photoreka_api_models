@@ -1,9 +1,11 @@
 {
-  "test_data": [
+  "test_data_1": [
     { "term": "animal", "tag": "dog", "expected": true },
     { "term": "feline", "tag": "cat", "expected": true },
     { "term": "white mammal", "tag": "white dog", "expected": true },
-    { "term": "mammal animal", "tag": "Moroccan", "expected": false },
+    { "term": "mammal animal", "tag": "Moroccan", "expected": null },
+    { "term": "animals", "tag": "nature", "expected": null },
+
     {
       "term": "joyful expressions",
       "tag": "smiling children",
@@ -24,38 +26,14 @@
       "tag": "intense crying",
       "expected": false
     },
-    { "term": "angry mob", "tag": "riot police", "expected": true },
+    { "term": "angry mob", "tag": "riot police", "expected": null },
     { "term": "calm ocean", "tag": "stormy waves", "expected": false },
     {
       "term": "children playing at sunsets",
       "tag": "a group of kids running on the beach as the sun sets",
       "expected": true
     },
-    {
-      "term": "a waiter smoking during a rainy night",
-      "tag": "a man standing under neon lights in the rain, with a cigarette in his hand",
-      "expected": true
-    },
-    {
-      "term": "people with umbrellas, but not dogs around",
-      "tag": "a busy street filled with people holding umbrellas, but no animals in sight",
-      "expected": true
-    },
-    {
-      "term": "a woman waiting at a train station",
-      "tag": "a blurry silhouette of a man rushing to catch a train",
-      "expected": false
-    },
-    {
-      "term": "a musician playing on the street",
-      "tag": "a saxophonist performing in a subway station",
-      "expected": true
-    },
-    {
-      "term": "a tired worker sitting at a bus stop",
-      "tag": "a businessman standing in line at a taxi stand",
-      "expected": false
-    },
+
     {
       "term": "a couple dancing under the moonlight",
       "tag": "a crowd at a rock concert",
@@ -69,21 +47,482 @@
     {
       "term": "a cat sleeping on a window ledge",
       "tag": "a cozy room with sunlight streaming in",
-      "expected": false
+      "expected": null
     },
-    {
-      "term": "a foggy morning in the mountains",
-      "tag": "a hiking trail covered in dense mist",
-      "expected": true
-    },
+
     { "term": "vehicle", "tag": "car", "expected": true },
     { "term": "car", "tag": "sedan", "expected": true },
-    { "term": "car", "tag": "transportation", "expected": false },
+    { "term": "car", "tag": "transportation", "expected": null },
     { "term": "budget car", "tag": "luxury vehicle", "expected": false },
     { "term": "technology", "tag": "smartphone", "expected": true },
     { "term": "smartphone", "tag": "iPhone", "expected": true },
     { "term": "mobile phone", "tag": "tablet", "expected": false },
     { "term": "wooden furniture", "tag": "wooden chair", "expected": true },
-    { "term": "red chair", "tag": "wooden chair", "expected": false }
+    { "term": "red chair", "tag": "wooden chair", "expected": false },
+    {
+      "term": "bird",
+      "tag": "sparrow",
+      "expected": true
+    },
+    {
+      "term": "bird",
+      "tag": "whale",
+      "expected": false
+    },
+    {
+      "term": "insect",
+      "tag": "ant",
+      "expected": true
+    },
+    {
+      "term": "fish",
+      "tag": "goldfish",
+      "expected": true
+    },
+    {
+      "term": "fish",
+      "tag": "sea lion",
+      "expected": false
+    },
+    {
+      "term": "professional athlete",
+      "tag": "basketball player",
+      "expected": true
+    },
+    {
+      "term": "professional athlete",
+      "tag": "chef",
+      "expected": false
+    },
+    {
+      "term": "building",
+      "tag": "skyscraper",
+      "expected": true
+    },
+    {
+      "term": "building",
+      "tag": "mountain",
+      "expected": false
+    },
+    {
+      "term": "furniture",
+      "tag": "sofa",
+      "expected": true
+    },
+    {
+      "term": "furniture",
+      "tag": "television",
+      "expected": false
+    },
+    {
+      "term": "tool",
+      "tag": "hammer",
+      "expected": true
+    },
+    {
+      "term": "tool",
+      "tag": "flower",
+      "expected": false
+    },
+    {
+      "term": "happy emotion",
+      "tag": "joy",
+      "expected": true
+    },
+    {
+      "term": "happy emotion",
+      "tag": "grief",
+      "expected": false
+    },
+    {
+      "term": "sad emotion",
+      "tag": "sorrow",
+      "expected": true
+    },
+    {
+      "term": "sad emotion",
+      "tag": "excitement",
+      "expected": false
+    },
+    {
+      "term": "celebration event",
+      "tag": "wedding",
+      "expected": true
+    },
+    {
+      "term": "celebration event",
+      "tag": "funeral",
+      "expected": false
+    },
+    {
+      "term": "morning",
+      "tag": "sunrise",
+      "expected": true
+    },
+    {
+      "term": "morning",
+      "tag": "midnight",
+      "expected": false
+    },
+    {
+      "term": "transportation method",
+      "tag": "train",
+      "expected": true
+    },
+    {
+      "term": "transportation method",
+      "tag": "microscope",
+      "expected": false
+    },
+    {
+      "term": "electronic device",
+      "tag": "laptop",
+      "expected": true
+    },
+    {
+      "term": "electronic device",
+      "tag": "wooden table",
+      "expected": false
+    },
+    {
+      "term": "job",
+      "tag": "doctor",
+      "expected": true
+    },
+    {
+      "term": "job",
+      "tag": "hobby",
+      "expected": false
+    },
+    {
+      "term": "electric car",
+      "tag": "tesla model S",
+      "expected": true
+    },
+    {
+      "term": "electric car",
+      "tag": "gasoline truck",
+      "expected": false
+    },
+    {
+      "term": "pet",
+      "tag": "hamster",
+      "expected": true
+    },
+    {
+      "term": "pet",
+      "tag": "tiger",
+      "expected": false
+    },
+    {
+      "term": "dessert",
+      "tag": "cake",
+      "expected": true
+    },
+    {
+      "term": "dessert",
+      "tag": "salad",
+      "expected": false
+    },
+    {
+      "term": "weapon",
+      "tag": "sword",
+      "expected": true
+    },
+    {
+      "term": "weapon",
+      "tag": "cushion",
+      "expected": null
+    },
+    {
+      "term": "train station",
+      "tag": "platform",
+      "expected": null
+    },
+    {
+      "term": "train station",
+      "tag": "airport runway",
+      "expected": false
+    },
+    {
+      "term": "soccer game",
+      "tag": "basketball hoop",
+      "expected": false
+    },
+    {
+      "term": "kitchen utensil",
+      "tag": "spoon",
+      "expected": true
+    },
+    {
+      "term": "kitchen utensil",
+      "tag": "television remote",
+      "expected": false
+    },
+    {
+      "term": "doctor",
+      "tag": "medicine",
+      "expected": null
+    },
+    {
+      "term": "doctor",
+      "tag": "construction crane",
+      "expected": false
+    },
+    {
+      "term": "urban area",
+      "tag": "downtown",
+      "expected": true
+    },
+    {
+      "term": "urban area",
+      "tag": "desert dunes",
+      "expected": false
+    },
+    {
+      "term": "car engine",
+      "tag": "piston",
+      "expected": true
+    },
+    {
+      "term": "car engine",
+      "tag": "windshield wiper",
+      "expected": false
+    },
+    {
+      "term": "camera lens",
+      "tag": "car tire",
+      "expected": null
+    },
+    {
+      "term": "content writer",
+      "tag": "blog post",
+      "expected": true
+    },
+    { "term": "dog", "tag": "tail", "expected": null },
+    { "term": "bicycle", "tag": "wheel", "expected": null },
+    { "term": "bicycle", "tag": "bicycle wheel", "expected": true },
+    { "term": "smartphone", "tag": "battery", "expected": null },
+    { "term": "fruit", "tag": "apple", "expected": true },
+    { "term": "vehicle", "tag": "bicycle", "expected": true },
+    { "term": "flower", "tag": "petal", "expected": true },
+    { "term": "building", "tag": "house", "expected": true },
+    { "term": "furniture", "tag": "table", "expected": true },
+    { "term": "tool", "tag": "screwdriver", "expected": true },
+    { "term": "electronic device", "tag": "smartwatch", "expected": true },
+    { "term": "weather", "tag": "rain", "expected": null },
+    { "term": "drink", "tag": "coffee", "expected": true },
+    { "term": "drink", "tag": "sugar", "expected": null },
+    { "term": "animal", "tag": "mammal", "expected": true },
+    { "term": "animal", "tag": "heart", "expected": false },
+    { "term": "continent", "tag": "symphony", "expected": null },
+    { "term": "music instrument", "tag": "piano", "expected": true },
+    { "term": "music instrument", "tag": "violin", "expected": true },
+    { "term": "language", "tag": "guitar", "expected": null },
+
+    { "term": "bad weather", "tag": "dark clouds", "expected": true },
+    { "term": "bad weather", "tag": "sunny day", "expected": false },
+    { "term": "rainy weather", "tag": "drizzling rain", "expected": true },
+    { "term": "stormy conditions", "tag": "calm breeze", "expected": false },
+    { "term": "winter weather", "tag": "snowfall", "expected": true },
+    { "term": "autumn weather", "tag": "autumn leaves", "expected": true },
+    { "term": "mild weather", "tag": "gentle breeze", "expected": true },
+    { "term": "overcast skies", "tag": "gray clouds", "expected": true },
+    { "term": "overcast skies", "tag": "clear blue sky", "expected": false },
+    { "term": "weather forecast", "tag": "pop culture", "expected": null },
+    { "term": "weather pattern", "tag": "abstract art", "expected": null },
+
+    { "term": "woman reading", "tag": "woman with a book", "expected": true },
+    { "term": "man in suit", "tag": "businessman", "expected": null },
+    { "term": "funny child", "tag": "smiling kid", "expected": null },
+    { "term": "woman reading", "tag": "woman jogging", "expected": false },
+    { "term": "man in suit", "tag": "casual man", "expected": false },
+    { "term": "funny child", "tag": "serious child", "expected": false },
+    { "term": "person on street", "tag": "pedestrian", "expected": true },
+    { "term": "person on street", "tag": "traffic light", "expected": null },
+    { "term": "woman jogging", "tag": "athletic woman", "expected": true },
+    { "term": "man in suit", "tag": "man with cap", "expected": null },
+    { "term": "child playing", "tag": "child at the park", "expected": true },
+    { "term": "elegant woman", "tag": "woman in a dress", "expected": true },
+    { "term": "man working", "tag": "construction worker", "expected": true },
+
+    { "term": "red book", "tag": "woman with a book", "expected": null },
+    { "term": "red book", "tag": "woman with a red book", "expected": true },
+    { "term": "green umbrella", "tag": "big green umbrella", "expected": true },
+    {
+      "term": "green big umbrella",
+      "tag": "child with umbrella",
+      "expected": null
+    },
+    {
+      "term": "green big umbrella",
+      "tag": "child with green big umbrella",
+      "expected": true
+    },
+
+    {
+      "term": "mischievous child",
+      "tag": "child causing trouble",
+      "expected": true
+    },
+    { "term": "person looking", "tag": "lost in thought", "expected": null },
+    { "term": "woman reading", "tag": "woman on the phone", "expected": false },
+    { "term": "man in suit", "tag": "stylish man", "expected": null },
+    { "term": "funny child", "tag": "teenager smiling", "expected": null },
+    { "term": "person on street", "tag": "street vendor", "expected": true },
+    { "term": "person on street", "tag": "office building", "expected": false },
+    { "term": "happy event", "tag": "funeral", "expected": false }
+  ],
+  "test_data_2": [
+    {
+      "term": "vibrant and welcoming Parisian street vibe",
+      "tag": "The scene captures a lively street in a Parisian neighborhood, showcasing a charming café named 'Florida' with a vibrant red awning that prominently displays the word 'CAFE'. The café's outdoor seating area is adorned with small round tables, each topped with a petite flower arrangement, creating an inviting atmosphere.",
+      "expected": true
+    },
+    {
+      "term": "gloomy and deserted urban alley",
+      "tag": "The scene captures a lively street in a Parisian neighborhood, showcasing a charming café named 'Florida' with a vibrant red awning that prominently displays the word 'CAFE'. The café's outdoor seating area is adorned with small round tables, each topped with a petite flower arrangement, creating an inviting atmosphere.",
+      "expected": false
+    },
+    {
+      "term": "intricately carved wooden tables",
+      "tag": "The scene captures a lively street in a Parisian neighborhood, showcasing a charming café named 'Florida' with a vibrant red awning that prominently displays the word 'CAFE'. The café's outdoor seating area is adorned with small round tables, each topped with a petite flower arrangement, creating an inviting atmosphere.",
+      "expected": null
+    },
+    {
+      "term": "a serious, contemplative mood amidst subtle tension",
+      "tag": "On the left, a woman wearing a hijab and glasses appears contemplative, her hands gripping a bag tightly, suggesting a sense of determination or perhaps anxiety. Her expression is serious, contrasting with the more relaxed demeanor of the woman next to her.",
+      "expected": true
+    },
+    {
+      "term": "a carefree and joyful interaction",
+      "tag": "On the left, a woman wearing a hijab and glasses appears contemplative, her hands gripping a bag tightly, suggesting a sense of determination or perhaps anxiety. Her expression is serious, contrasting with the more relaxed demeanor of the woman next to her.",
+      "expected": false
+    },
+    {
+      "term": "a vibrant celebration of colors",
+      "tag": "On the left, a woman wearing a hijab and glasses appears contemplative, her hands gripping a bag tightly, suggesting a sense of determination or perhaps anxiety. Her expression is serious, contrasting with the more relaxed demeanor of the woman next to her.",
+      "expected": null
+    },
+    {
+      "term": "a reflective mood in a cozy, warm restaurant setting",
+      "tag": "His attention is focused on the device, which suggests a moment of solitude or contemplation amidst the bustling environment. The background reveals a cozy restaurant ambiance, with warm lighting and plush seating, hinting at a welcoming atmosphere.",
+      "expected": true
+    },
+    {
+      "term": "a chaotic party scene with blinding lights",
+      "tag": "His attention is focused on the device, which suggests a moment of solitude or contemplation amidst the bustling environment. The background reveals a cozy restaurant ambiance, with warm lighting and plush seating, hinting at a welcoming atmosphere.",
+      "expected": false
+    },
+    {
+      "term": "an underwater tranquility with marine life",
+      "tag": "His attention is focused on the device, which suggests a moment of solitude or contemplation amidst the bustling environment. The background reveals a cozy restaurant ambiance, with warm lighting and plush seating, hinting at a welcoming atmosphere.",
+      "expected": null
+    },
+    {
+      "term": "a heartwarming scene full of innocent charm and familial warmth",
+      "tag": "The child, dressed in a light blue outfit, exudes innocence and curiosity, creating a heartwarming moment that contrasts with the more subdued demeanor of the adults. The background features a glass storefront with a variety of hair-related images displayed, hinting at the salon's services. The overall atmosphere is vibrant, with a blend of casual street life and familial warmth, highlighting the interactions between different generations.",
+      "expected": true
+    },
+    {
+      "term": "a focus on modern salon equipment and digital displays",
+      "tag": "The child, dressed in a light blue outfit, exudes innocence and curiosity, creating a heartwarming moment that contrasts with the more subdued demeanor of the adults. The background features a glass storefront with a variety of hair-related images displayed, hinting at the salon's services. The overall atmosphere is vibrant, with a blend of casual street life and familial warmth, highlighting the interactions between different generations.",
+      "expected": false
+    },
+    {
+      "term": "a somber reflection on isolated urban life",
+      "tag": "The child, dressed in a light blue outfit, exudes innocence and curiosity, creating a heartwarming moment that contrasts with the more subdued demeanor of the adults. The background features a glass storefront with a variety of hair-related images displayed, hinting at the salon's services. The overall atmosphere is vibrant, with a blend of casual street life and familial warmth, highlighting the interactions between different generations.",
+      "expected": null
+    },
+    {
+      "term": "a contemplative mood with layered reflections and introspection",
+      "tag": "The reflections in the glass add depth to the image, creating a layered effect that enhances the feeling of being in transit. The overall atmosphere is one of quiet introspection, highlighting the individual experiences of commuters in a shared space, each person navigating their own journey amidst the hustle and bustle of city life.",
+      "expected": true
+    },
+    {
+      "term": "an exuberant festival celebrating joyful unity",
+      "tag": "The reflections in the glass add depth to the image, creating a layered effect that enhances the feeling of being in transit. The overall atmosphere is one of quiet introspection, highlighting the individual experiences of commuters in a shared space, each person navigating their own journey amidst the hustle and bustle of city life.",
+      "expected": false
+    },
+    {
+      "term": "a depiction of rural tranquility under starry skies",
+      "tag": "The reflections in the glass add depth to the image, creating a layered effect that enhances the feeling of being in transit. The overall atmosphere is one of quiet introspection, highlighting the individual experiences of commuters in a shared space, each person navigating their own journey amidst the hustle and bustle of city life.",
+      "expected": null
+    },
+    {
+      "term": "a warm, communal street scene full of relaxed interaction",
+      "tag": "The image captures a lively street scene filled with children and adults interacting in a casual outdoor setting. In the foreground, a woman wearing a yellow shirt and a patterned hijab sits on a blue chair, holding a child who appears to be resting against her.",
+      "expected": true
+    },
+    {
+      "term": "a cold, isolated moment of solitary despair",
+      "tag": "The image captures a lively street scene filled with children and adults interacting in a casual outdoor setting. In the foreground, a woman wearing a yellow shirt and a patterned hijab sits on a blue chair, holding a child who appears to be resting against her.",
+      "expected": false
+    },
+    {
+      "term": "a surreal encounter with fantastical creatures",
+      "tag": "The image captures a lively street scene filled with children and adults interacting in a casual outdoor setting. In the foreground, a woman wearing a yellow shirt and a patterned hijab sits on a blue chair, holding a child who appears to be resting against her.",
+      "expected": null
+    },
+    {
+      "term": "a prominently displayed ancient temple painting and parked black bicycle",
+      "tag": "The image captures a vibrant street scene showcasing an art gallery or shop. The foreground features a black bicycle resting against a wall, its wheels slightly turned, suggesting it has just been parked. To the right, a large, colorful painting of an ancient temple, possibly Angkor Wat, is prominently displayed on an easel.\n\nOne monk gestures animatedly, perhaps pointing towards something of interest, while the other listens intently. Below them, an elderly man in an orange sweater and a woman in a yellow skirt stand on the steps, seemingly engaged in a discussion. The woman appears contemplative, while the man gestures with his hands, indicating a lively exchange.\n\nThe contrast between the innocence of the children and the adult world around them creates a poignant moment, inviting viewers to reflect on the simplicity of childhood amidst the complexities of city life.",
+      "expected": true
+    },
+    {
+      "term": "an eerie, disjointed ambiance devoid of human connection",
+      "tag": "The image captures a vibrant street scene showcasing an art gallery or shop. The foreground features a black bicycle resting against a wall, its wheels slightly turned, suggesting it has just been parked. To the right, a large, colorful painting of an ancient temple, possibly Angkor Wat, is prominently displayed on an easel.\n\nOne monk gestures animatedly, perhaps pointing towards something of interest, while the other listens intently. Below them, an elderly man in an orange sweater and a woman in a yellow skirt stand on the steps, seemingly engaged in a discussion. The woman appears contemplative, while the man gestures with his hands, indicating a lively exchange.\n\nThe contrast between the innocence of the children and the adult world around them creates a poignant moment, inviting viewers to reflect on the simplicity of childhood amidst the complexities of city life.",
+      "expected": false
+    },
+    {
+      "term": "a lighthearted carnival filled with playful energy",
+      "tag": "The image captures a vibrant street scene showcasing an art gallery or shop. The foreground features a black bicycle resting against a wall, its wheels slightly turned, suggesting it has just been parked. To the right, a large, colorful painting of an ancient temple, possibly Angkor Wat, is prominently displayed on an easel.\n\nOne monk gestures animatedly, perhaps pointing towards something of interest, while the other listens intently. Below them, an elderly man in an orange sweater and a woman in a yellow skirt stand on the steps, seemingly engaged in a discussion. The woman appears contemplative, while the man gestures with his hands, indicating a lively exchange.\n\nThe contrast between the innocence of the children and the adult world around them creates a poignant moment, inviting viewers to reflect on the simplicity of childhood amidst the complexities of city life.",
+      "expected": null
+    },
+    {
+      "term": "worn blue cart filled with assorted items",
+      "tag": "Nearby, a blue cart, slightly worn and filled with various items, hints at the daily life and commerce that takes place in this bustling area. The juxtaposition of the woman in her colorful attire against the more subdued background creates a dynamic visual narrative, emphasizing the blend of tradition and modernity.",
+      "expected": true
+    },
+    {
+      "term": "pristine red cart with empty compartments",
+      "tag": "Nearby, a blue cart, slightly worn and filled with various items, hints at the daily life and commerce that takes place in this bustling area. The juxtaposition of the woman in her colorful attire against the more subdued background creates a dynamic visual narrative, emphasizing the blend of tradition and modernity.",
+      "expected": false
+    },
+    {
+      "term": "rustic wooden bicycle with ornate carvings",
+      "tag": "Nearby, a blue cart, slightly worn and filled with various items, hints at the daily life and commerce that takes place in this bustling area. The juxtaposition of the woman in her colorful attire against the more subdued background creates a dynamic visual narrative, emphasizing the blend of tradition and modernity.",
+      "expected": null
+    },
+    {
+      "term": "golden late afternoon sunlight with warm glow",
+      "tag": "The warm light of the late afternoon sun bathes the scene, creating a golden hue that enhances the vibrancy of the colors and the liveliness of the interactions. This image tells a story of community, commerce, and the blending of tradition with modernity.",
+      "expected": true
+    },
+    {
+      "term": "cold blue neon lights with icy brightness",
+      "tag": "The warm light of the late afternoon sun bathes the scene, creating a golden hue that enhances the vibrancy of the colors and the liveliness of the interactions. This image tells a story of community, commerce, and the blending of tradition with modernity.",
+      "expected": false
+    },
+    {
+      "term": "antique brass clock with intricate details",
+      "tag": "The warm light of the late afternoon sun bathes the scene, creating a golden hue that enhances the vibrancy of the colors and the liveliness of the interactions. This image tells a story of community, commerce, and the blending of tradition with modernity.",
+      "expected": null
+    },
+    {
+      "term": "casual man beside angular walls and historic doorways",
+      "tag": "In the background, a man stands casually, partially obscured by the architectural features of the courtyard, which include angular walls and doorways that hint at a rich history. The interplay of light and shadow creates a dynamic atmosphere, suggesting a narrative of daily life in this communal space.",
+      "expected": true
+    },
+    {
+      "term": "elegant woman in front of smooth modern arches",
+      "tag": "In the background, a man stands casually, partially obscured by the architectural features of the courtyard, which include angular walls and doorways that hint at a rich history. The interplay of light and shadow creates a dynamic atmosphere, suggesting a narrative of daily life in this communal space.",
+      "expected": false
+    },
+    {
+      "term": "polished marble statue with intricate carvings",
+      "tag": "In the background, a man stands casually, partially obscured by the architectural features of the courtyard, which include angular walls and doorways that hint at a rich history. The interplay of light and shadow creates a dynamic atmosphere, suggesting a narrative of daily life in this communal space.",
+      "expected": null
+    }
   ]
 }
