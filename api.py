@@ -49,9 +49,11 @@ def load_embeddings_model():
     # model = SentenceTransformer('all-MiniLM-L6-v2')
     lemmatizer = WordNetLemmatizer()
     spacy_model = spacy.load("en_core_web_sm")  # Load a small English NLP model
-    deberta_classifier = pipeline("text-classification", model="MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli", device=device) #roberta-large-mnli
-    roberta_classifier = pipeline("text-classification", model="roberta-large-mnli", device=device) #roberta-large-mnli
-    return embeddings_model, lemmatizer, spacy_model, deberta_classifier, roberta_classifier
+    # deberta_classifier = pipeline("text-classification", model="MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli", device=device) #roberta-large-mnli
+    roberta_classifier_zero = pipeline("zero-shot-classification", model="roberta-large-mnli", device=device)
+    roberta_classifier_text = pipeline("text-classification", model="roberta-large-mnli", device=device)
+    # bart_classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli", device=device) #roberta-large-mnli
+    return embeddings_model, lemmatizer, spacy_model, roberta_classifier_zero, roberta_classifier_text
 
 
 def load_wordnet():
@@ -1031,284 +1033,195 @@ async def get_embeddings():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/roberta_zeroshot_classification", methods=["POST"])
+def zeroshot_classification():
+    start_time = time.time()
+    
+    # Obtener datos de la petición
+    data = request.json
+    query = data.get("query", "")
+    labels = data.get("labels", [])
+    
+    if not query or not labels:
+        return jsonify({"error": "Missing required fields (query, labels)"}), 400
+    
+    print(f"[INFO] Ejecutando Zero-Shot Classification para: '{query}' con etiquetas {labels}")
+    result = roberta_classifier_zero(query, labels)
+    
+    response = {
+        "query": query,
+        "labels": result["labels"],
+        "scores": result["scores"]
+    }
+    
+    return jsonify(response)
 
-async def run_proximity_inference(term, tag_list, model_name, phrase_wrapper, min_connectors, positive_connectors):
-    """
-    Ejecuta la inferencia de proximidades con los parámetros dados.
-    """
+@app.route("/roberta_text_classification", methods=["POST"])
+def text_classification():
     start_time = time.time()
     BATCH_SIZE = 32
-    classifier = deberta_classifier if model_name == "deberta" else roberta_classifier
-    wrapped_term = phrase_wrapper.format(term=term) if term else ""
     
-    results = {}
+    # Obtener datos de la petición
+    data = request.json
+    premise = data.get("premise", "")
+    hypothesis = data.get("hypothesis", "")
+    
+    if not premise or not hypothesis:
+        return jsonify({"error": "Missing required fields (premise, hypothesis)"}), 400
+    
+    print(f"[INFO] Ejecutando Text Classification para: Premisa '{premise}' - Hipótesis '{hypothesis}'")
+    
+    dataset = Dataset.from_dict({"text": [f"{premise} [SEP] {hypothesis}"]})
+    batch_results = roberta_classifier_text(dataset["text"], batch_size=BATCH_SIZE)
+    
+    result = batch_results[0] if batch_results else {"label": "unknown", "score": 0.0}
+    
+    response = {
+        "premise": premise,
+        "hypothesis": hypothesis,
+        "label": result["label"].lower(),
+        "score": result["score"]
+    }
+    
+    return jsonify(response)
+
+
+p = inflect.engine()
+def format_term(term):
+    """Añade 'a' si el término es singular y contable, de lo contrario lo deja como está."""
+    if not term:
+        return term  # Retorna directamente si no hay término
+
+    singular_form = p.singular_noun(term)
+    print(f"[DEBUG] Procesando término: '{term}', singular_noun: {singular_form}")
+
+    # Si singular_form es None o False, significa que el término ya es singular.
+    if singular_form in [None, False]:
+        return f"a {term}" if not term.endswith("s") else term
+
+# posibles adiciones: weather (rainy weather), time, (evening time)
+def combine_tag_name_with_group(tag):
+    if tag.get("group") == "symbols":
+        return f"symbol of {tag['name']}"
+    if tag.get("group") == "culture":
+        return f"{tag['name']} culture"
+    return tag["name"]
+
+@app.route("/adjust_tags_proximities_by_context_inference", methods=["POST"])
+async def adjust_tags_proximities_by_context_inference():
+    
+    BATCH_SIZE= 32
+    THRESHOLD=0.85 # TODO: calificar la query en 1) cosa concreta -> 0.8, 2) adjetivo valorativo -> 0.7, 3) sentimiento -> 0.7
+
+    data = request.json
+    term = preprocess_text(data.get("term", ""), True)
+    tag_list = data.get("tag_list", [])
+    premise_wrapper = data.get("premise_wrapper", "The photo featured {term}")
+    hypothesis_wrapper = data.get("hypothesis_wrapper", "The photo featured {term}")
+    
+    if not term or not tag_list:
+        return jsonify({"error": "Missing required fields (term, tag_list)"}), 400
+    
+    print(f"[INFO] Ejecutando inferencia de proximidad para: '{term}' con {len(tag_list)} etiquetas")
+    
     batch_queries = []
-    batch_metadata = []
-    
-    print(f"[INFO] Generando batch de consultas para '{term}' con {len(tag_list)} etiquetas")
+    tag_names = []
     
     for tag in tag_list:
-        wrapped_tag = phrase_wrapper.format(term=tag["name"])
-        for connector, props in positive_connectors.items():
-            query = f"{{{wrapped_tag}}} {connector} {{{wrapped_term}}}"
-            batch_queries.append(query)
-            batch_metadata.append((tag["name"], connector, props["threshold"]))
+        premise_text = premise_wrapper.format(term=preprocess_text(combine_tag_name_with_group(tag)))
+        hypothesis_text = hypothesis_wrapper.format(term=term)
+        query_text = f"{premise_text} [SEP] {hypothesis_text}"
+        
+        batch_queries.append(query_text)
+        tag_names.append(tag['name'])
+        
+        print(f"[DEBUG] Inferencia: Premisa = '{premise_text}', Hipótesis = '{hypothesis_text}'")
     
-    if not batch_queries:
-        print("[INFO] No hay consultas a procesar.")
-        return results
-    
-    print(f"[INFO] Ejecutando inferencia en batch con {len(batch_queries)} consultas...")
+    # Usar Dataset de Hugging Face para optimizar el batch processing
     dataset = Dataset.from_dict({"text": batch_queries})
-    batch_results = classifier(dataset["text"], batch_size=BATCH_SIZE)
-    print("[INFO] Inferencia completada.")
+    batch_results = roberta_classifier_text(dataset["text"], batch_size=BATCH_SIZE)
     
-    processed_results = {}
-    for (tag_name, connector, threshold), result in zip(batch_metadata, batch_results):
+    results = {}
+    for tag_name, result in zip(tag_names, batch_results):
         label = result["label"].lower()
         score = result["score"]
         
-        key = tag_name
-        if key not in processed_results:
-            processed_results[key] = {
-                "adjusted_proximity": 0,
-                "matched_positive_connectors": [],
-                "matched_negative_connectors": [],
-                "matched_neutral_connectors": [],
-            }
-
-        log_message = f"[MATCH] {tag_name} {connector} {term}, score: {score:.4f}"
-        
-        if score >= threshold:
-            if label == "entailment":
-                processed_results[key]["matched_positive_connectors"].append((connector, score))
-                print(f"[INFO] ✅ {log_message} (Entailment)")
-            elif label == "contradiction":
-                processed_results[key]["matched_negative_connectors"].append((connector, score))
-                print(f"[INFO] ❌ {log_message} (Contradiction)")
-            else:
-                processed_results[key]["matched_neutral_connectors"].append((connector, score))
-                # print(f"[INFO] ⚖️ {log_message} (Neutral)")
-    
-    for key, result_data in processed_results.items():
-        entailment = result_data["matched_positive_connectors"]
-        contradiction = result_data["matched_negative_connectors"]
-        
-        if len(entailment) >= min_connectors and len(contradiction) >= min_connectors:
-            result_data["adjusted_proximity"] = 0
-        elif len(contradiction) >= min_connectors:
-            avg_score = sum(s for _, s in contradiction) / len(contradiction)
-            result_data["adjusted_proximity"] = max(-avg_score, -1)
-        elif len(entailment) >= min_connectors:
-            base_score = sum(s for _, s in entailment) / len(entailment)
-            result_data["adjusted_proximity"] = min(base_score, 1)
+        # Aplicar umbral mínimo para considerar entailment o contradiction
+        if score >= THRESHOLD:
+            adjusted_score = score if label == "entailment" else -score if label == "contradiction" else 0
         else:
-            result_data["adjusted_proximity"] = 0
+            adjusted_score = 0  # Si el score es menor al umbral, se trata como neutral
         
-        results[key] = result_data
-    
-    print("[INFO] Proximidades ajustadas correctamente.")
-    return results
-
-@app.route('/classify_query_type', methods=['POST'])
-def classify_query_type(query):
-    """
-    Determina si una query se refiere a un objeto, un ser vivo, un concepto abstracto o una emoción.
-    Devuelve la categoría, los conectores asociados y verifica si la inferencia supera el threshold mínimo.
-    """
-
-    # data = request.json
-    # query = data.get("query")
-
-    if not query:
-        return {"error": "Missing 'term' in request"}, 400
-
-    # Reformular las consultas en una única frase con sus respectivos conectores y thresholds
-    categories = {
-        "object": {
-            "statement": f"{{{query}}} is a {{concrete object}}",
-            "connectors": ["is a subclass of", "is more specific that", "implies the presence of"],
-            "threshold": 0.55
-        },
-        "place": {
-            "statement": f"{{{query}}} is a {{place}}",
-            "connectors": ["is a subclass of", "implies the presence of"],
-            "threshold": 0.55
-        },
-        # "action": {
-        #     "statement": f"{{{query}}} implies {{someone doing something}}",
-        #     "connectors": ["is a subclass of"],
-        #     "threshold": 0.55
-        # },
-        "being": {
-            "statement": f"{{{query}}} is a {{living creature}}",
-            "connectors": ["is a subclass of", "is more specific that"],
-            "threshold": 0.55
-        },
-        "concept": {
-            "statement": f"{{{query}}} is an {{concept}}",
-            "connectors": ["is a subclass of", "is more specific that"],
-            "threshold": 0.55
-        },
-        "emotion": {
-            "statement": f"{{{query}}} is a {{emotion}}",
-            "connectors": ["implies", "entails"],
-            "threshold": 0.6
-        }
-    }
-
-    scores = {}
-    valid_categories = {}
-
-    for category, details in categories.items():
-        result = roberta_classifier(details["statement"])  # Se pasa como una única string
-        entail_score = next((x["score"] for x in result if x["label"].lower() == "entailment"), 0)
-        scores[category] = entail_score
-
-        # Solo considerar categorías que superen el threshold
-        if entail_score >= details["threshold"]:
-            valid_categories[category] = entail_score
-
-    # Elegir la categoría con mayor score entre las válidas
-    if valid_categories:
-        best_category = max(valid_categories, key=valid_categories.get)
-        best_connectors = categories[best_category]["connectors"]
-    else:
-        best_category = "unclear"
-        best_connectors = []
-
-    return {
-        "category": best_category,
-        "connectors": best_connectors,
-        "scores": scores
-    }
-
-@app.route('/test_adjust_proximities_by_context_inference', methods=['POST'])
-async def test_adjust_proximities_by_context_inference():
-    test_data = request.json.get("test_data", [])
-    models = request.json.get("models", ["roberta", "deberta"])
-    phrase_wrappers = request.json.get("phrase_wrappers", ["the photo featured a {term}", "{term}"])
-    min_connectors_list = request.json.get("min_connectors", [1, 2])
-    connector_list = request.json.get("connectors", ["implies", "implies the presence of", "is a synonym of", "entails"])
-    thresholds = request.json.get("thresholds", [0.4, 0.45, 0.5, 0.55, 0.6, 0.7])
-    
-    if not test_data:
-        return {"error": "No test data provided."}, 400
-    
-    connector_combinations = []
-    for i in range(1, len(connector_list) + 1):
-        connector_combinations.extend(itertools.combinations(connector_list, i))
-    
-    threshold_combinations = list(itertools.product(thresholds, repeat=len(connector_list)))
-    
-    param_combinations = itertools.product(
-        models,
-        phrase_wrappers,
-        min_connectors_list,
-        connector_combinations,
-        threshold_combinations
-    )
-    
-    results = []
-    print("[INFO] Iniciando pruebas de combinaciones...")
-    for model, phrase_wrapper, min_connectors, connectors, threshold_values in param_combinations:
-        print(f"[INFO] Probando configuración - Modelo: {model}, MinConnectors: {min_connectors}, Conectores: {connectors}")
-        
-        positive_connectors = {
-            key: {"threshold": threshold_values[idx], "bonif": 1.2}  # Puedes ajustar bonificaciones según necesidad
-            for idx, key in enumerate(connectors)
+        results[tag_name] = {
+            "adjusted_proximity": adjusted_score,
+            "label": label,
+            "score": score
         }
         
-        correct_count = 0
-        failures = []
-        
-        for test in test_data:
-            response = await run_proximity_inference(
-                test["term"],
-                [{"name": test["tag"]}],
-                model,
-                phrase_wrapper,
-                min_connectors,
-                positive_connectors
-            )
-            
-            inferred_proximity = response.get(test["tag"], {}).get("adjusted_proximity", 0)
-            expected = test["expected"]
-            inferred_label = True if inferred_proximity > 0 else False if inferred_proximity < 0 else None
-            
-            if inferred_label == expected:
-                correct_count += 1
-            else:
-                failures.append({
-                    "term": test["term"],
-                    "tag": test["tag"],
-                    "expected": expected,
-                    "predicted": inferred_label,
-                    "inferred_proximity": inferred_proximity
-                })
-        
-        accuracy = correct_count / len(test_data)
-        results.append({
-            "model": model,
-            "phrase_wrapper": phrase_wrapper,
-            "min_connectors": min_connectors,
-            "connectors": connectors,
-            "thresholds": list(threshold_values),
-            "accuracy": accuracy,
-            "failures": failures
-        })
+        if label == "entailment" and score >= THRESHOLD:
+            print(f"✅ [MATCH] {tag_name}: {label.upper()} con score {score:.4f}")
+        # elif label == "contradiction" and score >= THRESHOLD:
+        #     print(f"❌ [MATCH] {tag_name}: {label.upper()} con score {score:.4f}")
     
-    results.sort(key=lambda x: x["accuracy"], reverse=True)
-    print("[INFO] Pruebas completadas.")
-    return {"ranking": results}
+    return jsonify(results)
 
-@app.route('/adjust_tags_proximities_by_context_inference', methods=['POST'])
-async def adjust_tags_proximities_by_context_inference():
+@app.route("/adjust_descs_proximities_by_context_inference", methods=["POST"])
+async def adjust_descs_proximities_by_context_inference():
+    
+    BATCH_SIZE= 32
+    THRESHOLD=0.55 
+
     data = request.json
-    term = preprocess_text(data.get("term"), True)
-
-    tag_list = [
-        {**tag, "name": preprocess_text(tag["name"], True)}
-        for tag in data.get("tag_list", [])
-    ]
-
-    model_name = "roberta"
-    phrase_wrapper = "the photo featured a {term}"
-    min_connectors = 1
-
-    query_type = classify_query_type(term)
-    connectors = query_type.get("connectors", [])  # Obtener lista de conectores
-
-    if not connectors:
-        print(f"[WARNING] ⚠️ No se encontraron conectores para {term}.")
-        return {"error": "No valid connectors found", "term": term}
-
-    print(f"[INFO] ✅ Conectores seleccionados para {term}: {connectors}, con category {query_type.get("category")}")
-
-    # Crear el diccionario de positive_connectors con todos los conectores devueltos
-    positive_connectors = {
-        connector: {"threshold": 0.6, "bonif": 1.2} for connector in connectors
-    }
-
-    return await run_proximity_inference(term, tag_list, model_name, phrase_wrapper, min_connectors, positive_connectors)
-
-
-
-@app.route('/adjust_description_proximities_by_context_inference', methods=['POST'])
-async def adjust_description_proximities_by_context_inference():
-    data = request.json
-    term = data.get("term")
-    tag_list = data.get("tag_list")
-    model_name = "roberta"
-    phrase_wrapper = "{term}"
-    min_connectors = 1
+    term = preprocess_text(data.get("term", ""), True)
+    tag_list = data.get("tag_list", [])
+    premise_wrapper = data.get("premise_wrapper", "the photo featured: {term}")
+    hypothesis_wrapper = data.get("hypothesis_wrapper", "the photo featured {term}")
     
-    positive_connectors = {
-        "implies": {"threshold": 0.7, "bonif": 1.2},
-    }
+    if not term or not tag_list:
+        return jsonify({"error": "Missing required fields (term, tag_list)"}), 400
     
-    return await run_proximity_inference(term, tag_list, model_name, phrase_wrapper, min_connectors, positive_connectors)
-
+    print(f"[INFO] Ejecutando inferencia de proximidad para: '{term}' con {len(tag_list)} etiquetas")
+    
+    batch_queries = []
+    tag_names = []
+    
+    for tag in tag_list:
+        premise_text = premise_wrapper.format(term=preprocess_text(combine_tag_name_with_group(tag)))
+        hypothesis_text = hypothesis_wrapper.format(term=term)
+        query_text = f"{premise_text} [SEP] {hypothesis_text}"
+        
+        batch_queries.append(query_text)
+        tag_names.append(tag['name'])
+        
+        print(f"[DEBUG] Inferencia: Premisa = '{premise_text}', Hipótesis = '{hypothesis_text}'")
+    
+    # Usar Dataset de Hugging Face para optimizar el batch processing
+    dataset = Dataset.from_dict({"text": batch_queries})
+    batch_results = roberta_classifier_text(dataset["text"], batch_size=BATCH_SIZE)
+    
+    results = {}
+    for tag_name, result in zip(tag_names, batch_results):
+        label = result["label"].lower()
+        score = result["score"]
+        
+        # Aplicar umbral mínimo para considerar entailment o contradiction
+        if score >= THRESHOLD:
+            adjusted_score = score if label == "entailment" else -score if label == "contradiction" else 0
+        else:
+            adjusted_score = 0  # Si el score es menor al umbral, se trata como neutral
+        
+        results[tag_name] = {
+            "adjusted_proximity": adjusted_score,
+            "label": label,
+            "score": score
+        }
+        
+        if label == "entailment" and score >= THRESHOLD:
+            print(f"✅ [MATCH] {tag_name}: {label.upper()} con score {score:.4f}")
+        elif label == "contradiction" and score >= THRESHOLD:
+            print(f"❌ [MATCH] {tag_name}: {label.upper()} con score {score:.4f}")
+    
+    return jsonify(results)
 
 
 if __name__ == "__main__":
@@ -1316,7 +1229,7 @@ if __name__ == "__main__":
     clear_cache()
 
     # Cargar modelos
-    embeddings_model, lemmatizer, spacy_model, deberta_classifier, roberta_classifier = load_embeddings_model()
+    embeddings_model, lemmatizer, spacy_model, roberta_classifier_zero, roberta_classifier_text = load_embeddings_model()
     load_wordnet()
     similarity_cache = {}
     # processor, model = load_blip_model()
