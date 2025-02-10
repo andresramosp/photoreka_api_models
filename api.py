@@ -9,8 +9,12 @@ import nltk
 from nltk.stem import WordNetLemmatizer
 import inflect
 import time
+from cachetools import TTLCache
 
 app = Flask(__name__)
+
+# Configurar caché con un tamaño máximo de 1000 elementos y TTL de 1 hora
+cache = TTLCache(maxsize=200000, ttl=3600)
 
 def load_wordnet():
     try:
@@ -32,7 +36,7 @@ def preprocess_text(text, to_singular=False):
     normalized_text = text.lower().replace('_', ' ')
 
     words = normalized_text.split()
-    if len(words) == 1:  # Apply lemmatization only for single words
+    if len(words) == 1:
         lemmatized_word = lemmatizer.lemmatize(normalized_text)
         if to_singular:
             return p.singular_noun(lemmatized_word) or lemmatized_word
@@ -52,67 +56,61 @@ def combine_tag_name_with_group(tag):
         return f"{tag['name']} (physical thing)"
     return tag["name"]
 
+def cached_inference(batch_queries, batch_size):
+    cached_results = []
+    queries_to_infer = []
+    indexes_to_infer = []
+
+    for i, query in enumerate(batch_queries):
+        if query in cache:
+            cached_results.append(cache[query])
+        else:
+            queries_to_infer.append(query)
+            indexes_to_infer.append(i)
+
+    if queries_to_infer:
+        batch_results = roberta_classifier_text(queries_to_infer, batch_size=batch_size)
+        for i, result in zip(indexes_to_infer, batch_results):
+            cache[batch_queries[i]] = result
+            cached_results.insert(i, result)
+
+    return cached_results
+
 @app.route("/adjust_tags_proximities_by_context_inference", methods=["POST"])
 async def adjust_tags_proximities_by_context_inference():
-    start_time = time.perf_counter()  # Iniciar medición de tiempo
-
+    start_time = time.perf_counter()
     BATCH_SIZE = 128
-    THRESHOLD = 0.82  # TODO: ajustar umbrales según el tipo de query
+    THRESHOLD = 0.82
 
     data = request.json
     term = preprocess_text(data.get("term", ""), True)
     tag_list = data.get("tag_list", [])
-    premise_wrapper = data.get("premise_wrapper", "The photo featured {term}") 
+    premise_wrapper = data.get("premise_wrapper", "The photo featured {term}") # 'The photo contains a tag {term}'
     hypothesis_wrapper = data.get("hypothesis_wrapper", "The photo featured {term}")
 
     if not term or not tag_list:
         return jsonify({"error": "Missing required fields (term, tag_list)"}), 400
 
-    # print(f"[INFO] Ejecutando inferencia de proximidad para: '{term}' con {len(tag_list)} etiquetas")
+    batch_queries = [
+        f"{premise_wrapper.format(term=preprocess_text(combine_tag_name_with_group(tag)))} [SEP] {hypothesis_wrapper.format(term=term)}"
+        for tag in tag_list
+    ]
+    tag_names = [tag['name'] for tag in tag_list]
 
-    batch_queries = []
-    tag_names = []
-
-    for tag in tag_list:
-        premise_text = premise_wrapper.format(term=preprocess_text(combine_tag_name_with_group(tag)))
-        hypothesis_text = hypothesis_wrapper.format(term=term)
-        query_text = f"{premise_text} [SEP] {hypothesis_text}"
-
-        batch_queries.append(query_text)
-        tag_names.append(tag['name'])
-
-        # print(f"[DEBUG] Inferencia: Premisa = '{premise_text}', Hipótesis = '{hypothesis_text}'")
-
-    # Usar Dataset de Hugging Face para optimizar el batch processing
-    dataset = Dataset.from_dict({"text": batch_queries})
-    batch_results = roberta_classifier_text(dataset["text"], batch_size=BATCH_SIZE)
+    batch_results = cached_inference(batch_queries, BATCH_SIZE)
 
     results = {}
     for tag_name, result in zip(tag_names, batch_results):
         label = result["label"].lower()
         score = result["score"]
+        adjusted_score = score if label == "entailment" and score >= THRESHOLD else -score if label == "contradiction" else 0
+        results[tag_name] = {"adjusted_proximity": adjusted_score, "label": label, "score": score}
+        icon = "✅" if label == "entailment" else "❌"
+        print(f"{icon} [MATCH] {tag_name}: {label.upper()} con score {score:.4f}")
 
-        # Aplicar umbral mínimo
-        if score >= THRESHOLD:
-            adjusted_score = score if label == "entailment" else -score if label == "contradiction" else 0
-        else:
-            adjusted_score = 0  # Si el score es menor al umbral, se trata como neutral
 
-        results[tag_name] = {
-            "adjusted_proximity": adjusted_score,
-            "label": label,
-            "score": score
-        }
-
-        if label == "entailment" and score >= THRESHOLD:
-            print(f"✅ [MATCH] {tag_name}: {label.upper()} con score {score:.4f}")
-
-    end_time = time.perf_counter()  # Fin de medición de tiempo
-    elapsed_time = end_time - start_time
-    print(f"⏳ Tiempo de ejecución: {elapsed_time:.4f} segundos")
-
+    print(f"⏳ Tiempo de ejecución: {time.perf_counter() - start_time:.4f} segundos")
     return jsonify(results)
-
 
 @app.route("/adjust_descs_proximities_by_context_inference", methods=["POST"])
 async def adjust_descs_proximities_by_context_inference():
@@ -128,40 +126,22 @@ async def adjust_descs_proximities_by_context_inference():
     if not term or not tag_list:
         return jsonify({"error": "Missing required fields (term, tag_list)"}), 400
 
-    batch_queries = []
-    tag_names = []
+    batch_queries = [
+        f"{premise_wrapper.format(term=preprocess_text(combine_tag_name_with_group(tag)))} [SEP] {hypothesis_wrapper.format(term=term)}"
+        for tag in tag_list
+    ]
+    tag_names = [tag['name'] for tag in tag_list]
 
-    for tag in tag_list:
-        premise_text = premise_wrapper.format(term=preprocess_text(combine_tag_name_with_group(tag)))
-        hypothesis_text = hypothesis_wrapper.format(term=term)
-        query_text = f"{premise_text} [SEP] {hypothesis_text}"
-
-        batch_queries.append(query_text)
-        tag_names.append(tag["name"])
-
-        # print(f"[DEBUG] Premise = '{premise_text}', Hypothesis = '{hypothesis_text}'")
-
-    dataset = Dataset.from_dict({"text": batch_queries})
-    batch_results = roberta_classifier_text(dataset["text"], batch_size=BATCH_SIZE)
+    batch_results = cached_inference(batch_queries, BATCH_SIZE)
 
     results = {}
     for tag_name, result in zip(tag_names, batch_results):
         label = result["label"].lower()
         score = result["score"]
-
-        if score >= THRESHOLD:
-            adjusted_score = score if label == "entailment" else -score if label == "contradiction" else 0
-        else:
-            adjusted_score = 0
-
-        results[tag_name] = {
-            "adjusted_proximity": adjusted_score,
-            "label": label,
-            "score": score
-        }
-
-        if label == "entailment" and score >= THRESHOLD:
-            print(f"✅ [MATCH] {tag_name}: {label.upper()} with score {score:.4f}")
+        adjusted_score = score if label == "entailment" and score >= THRESHOLD else -score if label == "contradiction" else 0
+        results[tag_name] = {"adjusted_proximity": adjusted_score, "label": label, "score": score}
+        icon = "✅" if label == "entailment" else "❌"
+        print(f"{icon} [MATCH] {tag_name}: {label.upper()} con score {score:.4f}")
 
     return jsonify(results)
 
@@ -185,12 +165,7 @@ async def get_embeddings():
 
 load_wordnet()
 embeddings_model, roberta_classifier_text = load_embeddings_model()
-
-
 asgi_app = WsgiToAsgi(app)
 
 if __name__ == "__main__":
     uvicorn.run(asgi_app, host="0.0.0.0", port=5000, reload=True)
-
-
-
