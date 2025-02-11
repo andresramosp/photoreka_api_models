@@ -177,9 +177,15 @@ def remove_prefix(query):
     
     # Common prefix phrases
     PREFIXES = [
-        "photos of", "images of", "pictures of",  "I want to see images of", "show me pictures with", "I'm looking for an image of",
-        "I need a photo where", "an image with", "a photo that shows", "I would like to explore pictures of"
+        "photos of", "images of", "pictures of", "I want to see images of", "show me pictures with", 
+        "I'm looking for an image of", "I need a photo where", "an image with", "a photo that shows", 
+        "I would like to explore pictures of", "photos resembling", "photos similar to", "photos inspired by", 
+        "photos evoking", "photos reminiscent of", "photos capturing the essence of", "photos reflecting", 
+        "photos resonating with", "images resembling", "images similar to", "images inspired by", 
+        "images evoking", "images reminiscent of", "pictures resembling", "pictures similar to", 
+        "pictures inspired by", "pictures reflecting", "pictures resonating with"
     ]
+
     PREFIX_EMBEDDINGS = embeddings_model.encode(PREFIXES, convert_to_tensor=True)
     
     words = query.lower().split()
@@ -204,6 +210,25 @@ def clean_segment(segment, nlp):
     filtered_words = [token.text for token in doc if token.pos_ not in {"DET", "ADP", "PRON", "AUX", "CCONJ", "SCONJ"}]
     return " ".join(filtered_words)
 
+def remove_duplicate_words(segments):
+    unique_segments = []
+    seen_words = set()
+    
+    for segment in segments:
+        words = segment.split()
+        filtered_words = []
+        
+        for word in words:
+            if word not in seen_words:
+                filtered_words.append(word)
+                seen_words.add(word)
+        
+        cleaned_segment = " ".join(filtered_words)
+        if cleaned_segment:
+            unique_segments.append(cleaned_segment)
+    
+    return unique_segments
+
 def segment_query(query):
     query = remove_prefix(query)
     
@@ -212,22 +237,39 @@ def segment_query(query):
     doc = nlp(query)
     
     segments = []
+    used_objects = set()  # Track attached direct objects to avoid duplication
+    
     for chunk in doc.noun_chunks:  # Extract noun phrases
         segments.append(chunk.text)
     
     # Extract verbs and attach them to the closest noun phrase
     verbs = [token for token in doc if token.pos_ == "VERB"]
     
-    # Create a mapping of verbs to the closest noun chunk
+    # Attach direct objects (dobj) without removing subjects (nsubj)
     for verb in verbs:
         closest_chunk = min(doc.noun_chunks, key=lambda chunk: abs(chunk.start - verb.i), default=None)
         if closest_chunk:
-            segments[segments.index(closest_chunk.text)] += f" {verb.text}"
+            verb_with_object = f"{closest_chunk.text} {verb.text}"  # Keep subject with verb
+            attached_object = None
+            for child in verb.children:
+                if child.dep_ == "dobj":  # Detect direct objects
+                    verb_with_object += f" {child.text}"
+                    attached_object = child.text
+            
+            # Replace the noun chunk with the verb phrase
+            segments[segments.index(closest_chunk.text)] = verb_with_object
+            
+            # Remove duplicate object if it exists as a separate segment
+            if attached_object and attached_object in segments:
+                segments.remove(attached_object)
     
     # Clean unnecessary connectors from each segment
     cleaned_segments = [clean_segment(segment, nlp) for segment in segments]
     
-    structured_query = " | ".join(cleaned_segments)
+    # Remove duplicate words and redundant segments
+    final_segments = remove_duplicate_words(cleaned_segments)
+    
+    structured_query = " | ".join(final_segments)
     print(f"🔹 Segmented query after cleaning: {structured_query}")
     return structured_query
 
@@ -242,6 +284,9 @@ def clean_query():
     clear_query = segment_query(query)
     print(f"📤 Generated response: {clear_query}")
     return jsonify({"clear": clear_query})
+
+
+
 
 load_wordnet()
 embeddings_model, roberta_classifier_text = load_embeddings_model()
