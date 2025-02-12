@@ -29,7 +29,9 @@ def load_embeddings_model():
     device = 0 if torch.cuda.is_available() else -1
     embeddings_model = SentenceTransformer('all-mpnet-base-v2', device=device)
     roberta_classifier_text = pipeline("text-classification", model="roberta-large-mnli", device=device)
-    return embeddings_model, roberta_classifier_text
+    ner_model = pipeline("ner", model="FacebookAI/xlm-roberta-large-finetuned-conll03-english", aggregation_strategy="simple")
+    nlp = spacy.load("en_core_web_sm")
+    return embeddings_model, roberta_classifier_text, nlp, ner_model
 
 def preprocess_text(text, to_singular=False):
     lemmatizer = WordNetLemmatizer()
@@ -205,7 +207,7 @@ def remove_prefix(query):
     print("❌ No irrelevant prefix detected.")
     return query
 
-def clean_segment(segment, nlp):
+def clean_segment(segment):
     doc = nlp(segment)
     filtered_words = [token.text for token in doc if token.pos_ not in {"DET", "ADP", "PRON", "AUX", "CCONJ", "SCONJ"}]
     return " ".join(filtered_words)
@@ -232,8 +234,6 @@ def remove_duplicate_words(segments):
 def segment_query(query):
     query = remove_prefix(query)
     
-    # Initialize spaCy model
-    nlp = spacy.load("en_core_web_sm")  # Load English model
     doc = nlp(query)
     
     segments = []
@@ -264,7 +264,7 @@ def segment_query(query):
                 segments.remove(attached_object)
     
     # Clean unnecessary connectors from each segment
-    cleaned_segments = [clean_segment(segment, nlp) for segment in segments]
+    cleaned_segments = [clean_segment(segment) for segment in segments]
     
     # Remove duplicate words and redundant segments
     final_segments = remove_duplicate_words(cleaned_segments)
@@ -289,7 +289,7 @@ def clean_query():
 
 
 load_wordnet()
-embeddings_model, roberta_classifier_text = load_embeddings_model()
+embeddings_model, roberta_classifier_text, nlp, ner_model = load_embeddings_model()
 asgi_app = WsgiToAsgi(app)
 
 if __name__ == "__main__":
