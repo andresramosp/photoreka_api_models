@@ -12,6 +12,7 @@ import time
 import spacy
 from spacy.matcher import Matcher
 from cachetools import TTLCache
+import re
 
 app = Flask(__name__)
 
@@ -174,6 +175,9 @@ async def get_embeddings():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+NEGATORS_SET = {"no", "not", "without", "except", "excluding", "with no"}
+NEGATORS_REGEX = r'\b(?:' + '|'.join(NEGATORS_SET) + r')\b'
+
 def get_segment_type(segment, nlp):
     """
     Procesa el segmento con spaCy y, si existe una entidad que cubra la totalidad,
@@ -187,21 +191,17 @@ def get_segment_type(segment, nlp):
 
 def remove_prefix(query):
     print(f"🔍 Processing query: {query}")
-    
-    # Common prefix phrases
     PREFIXES = [
-        "photos of", "images of", "pictures of", "I want to see images of", "show me pictures with", 
+        "photos ", "photos of", "images of", "pictures of", "I want to see images of", "show me pictures with", 
         "I'm looking for an image of", "I need a photo where", "an image with", "a photo that shows", 
         "I would like to explore pictures of", "photos resembling", "photos similar to", "photos inspired by", 
         "photos evoking", "photos reminiscent of", "photos capturing the essence of", "photos reflecting", 
         "photos resonating with", "images resembling", "images similar to", "images inspired by", 
-        "images evoking", "images reminiscent of", "pictures resembling", "pictures similar to", "photos featuring", "images featuring"
+        "images evoking", "images reminiscent of", "pictures resembling", "pictures similar to",  "photos featuring", "images featuring",
         "pictures inspired by", "pictures reflecting", "pictures resonating with", "images for a project", "images for a series"
     ]
     PREFIX_EMBEDDINGS = embeddings_model.encode(PREFIXES, convert_to_tensor=True)
-    
     words = query.lower().split()
-    # Try removing progressive sequences of 2 to 6 words
     for n in range(2, 7):
         if len(words) >= n:
             segment = " ".join(words[:n])
@@ -210,14 +210,19 @@ def remove_prefix(query):
             print(f"🧐 Similarity for segment '{segment}': {similarities.tolist()}")
             if any(similarity.item() > 0.8 for similarity in similarities):
                 print(f"✅ Prefix detected and removed: {segment}")
-                # Se usa la versión original para mantener la capitalización
                 return " ".join(query.split()[n:]).strip()
     print("❌ No irrelevant prefix detected.")
     return query
 
 def clean_segment(segment, nlp):
     doc = nlp(segment)
-    filtered_words = [token.text for token in doc if token.pos_ not in {"DET", "ADP", "PRON", "AUX", "CCONJ", "SCONJ"}]
+    filtered_words = []
+    for token in doc:
+        # Se conserva el token si es un negador, utilizando el conjunto global
+        if token.text.lower() in NEGATORS_SET:
+            filtered_words.append(token.text)
+        elif token.pos_ not in {"DET", "ADP", "PRON", "AUX", "CCONJ", "SCONJ"}:
+            filtered_words.append(token.text)
     return " ".join(filtered_words)
 
 def remove_duplicate_words(segments):
@@ -238,19 +243,18 @@ def remove_duplicate_words(segments):
 def extract_named_entities_and_remove(query):
     """
     Usa ner_model para detectar entidades nombradas y las elimina del query.
-    Retorna una tupla: (query_sin_entidades, lista_completa_de_resultados del NER)
+    Retorna: (query_sin_entidades, lista_de_resultados del NER)
     """
-    ner_results = ner_model(query)  # Se espera que cada resultado tenga al menos las claves "word", "score" y "entity_group" (o "label")
-    ne_texts = [res["word"] for res in ner_results]
+    ner_results = ner_model(query)  # Cada resultado contiene, por ejemplo, "word", "score", "entity_group"
+    ne_list = [res["word"] for res in ner_results]
     query_without_ne = query
-    for ent in ne_texts:
-        # Se realiza un reemplazo simple (case-sensitive)
+    for ent in ne_list:
         query_without_ne = query_without_ne.replace(ent, "")
     return query_without_ne.strip(), ner_results
 
-def extract_prepositional_phrases_and_remove(query, nlp):
+def extract_prepositional_phrases_and_remove(query):
     """
-    Usa el Matcher para detectar secuencias tipo NOUN + ADP + NOUN (posiblemente repetidas) y las elimina del query.
+    Usa el Matcher para detectar secuencias tipo NOUN + ADP + NOUN y las elimina del query.
     Retorna: (query_sin_PP, lista_de_frases_pp)
     """
     from spacy.matcher import Matcher
@@ -273,7 +277,7 @@ def extract_prepositional_phrases_and_remove(query, nlp):
 
 def get_segment_type(segment):
     """
-    Usa ner_model para procesar el segmento y, si se detecta una entidad (con buena score) que cubra el segmento,
+    Usa ner_model para procesar el segmento y, si se detecta una entidad que cubra el segmento,
     devuelve su etiqueta (entity_group o label); de lo contrario, devuelve "OTHER".
     """
     ner_results = ner_model(segment)
@@ -282,25 +286,40 @@ def get_segment_type(segment):
         return best.get("entity_group", best.get("label", "OTHER"))
     return "OTHER"
 
+def extract_negative_terms(query):
+    """
+    Extrae términos negativos del query usando regex.
+    Busca patrones como "no <word>", "without <word>", "not <word>" o "except <word>".
+    Retorna un conjunto de términos negativos (en minúsculas).
+    """
+    query_lower = query.lower()
+    neg_terms = re.findall(NEGATORS_REGEX, query_lower)
+    return set(neg_terms)
+
+def remove_negators(segment):
+    """
+    Elimina palabras negadoras (usando NEGATORS_REGEX) del segmento y limpia la puntuación sobrante.
+    """
+    cleaned = re.sub(NEGATORS_REGEX, '', segment, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip(" ,;:-")
+    return cleaned
+
+
 def segment_query(query):
     # Paso 1: Eliminar el prefijo
     query = remove_prefix(query)
     
-    # Inicializar spaCy
-    import spacy
-    nlp = spacy.load("en_core_web_sm")
-    
-    # Paso 2: Extraer (bloquear) las entidades nombradas usando ner_model y eliminarlas del query
+    # Paso 2: Extraer las entidades nombradas usando ner_model y eliminarlas del query.
     query_no_ne, ner_results = extract_named_entities_and_remove(query)
     
-    # Paso 3: Extraer (bloquear) las frases preposicionales y eliminarlas del query
-    query_clean, pp_list = extract_prepositional_phrases_and_remove(query_no_ne, nlp)
+    # Paso 3: Extraer las frases preposicionales y eliminarlas del query.
+    query_clean, pp_list = extract_prepositional_phrases_and_remove(query_no_ne)
     
-    # Paso 4: Segmentar el query limpio (sin NE ni PP) usando los noun_chunks de spaCy
+    # Paso 4: Segmentar el query limpio usando los noun_chunks de spaCy.
     doc = nlp(query_clean)
     segments = [chunk.text for chunk in doc.noun_chunks]
     
-    # Adjuntar verbos al sintagma nominal más cercano (manteniendo el sujeto)
+    # Adjuntar verbos al sintagma nominal más cercano (manteniendo el sujeto).
     verbs = [token for token in doc if token.pos_ == "VERB"]
     for verb in verbs:
         closest_chunk = min(doc.noun_chunks, key=lambda chunk: abs(chunk.start - verb.i), default=None)
@@ -315,10 +334,11 @@ def segment_query(query):
             if attached_object and attached_object in segments:
                 segments.remove(attached_object)
     
+    # Limpiar cada segmento
     cleaned_segments = [clean_segment(segment, nlp) for segment in segments]
     final_segments = remove_duplicate_words(cleaned_segments)
     
-    # Paso 5: Añadir al final los bloques extraídos (las NE y las PP)
+    # Paso 5: Agregar al final los bloques extraídos (las entidades y las PP) si no están ya presentes.
     for res in ner_results:
         ent_text = res["word"]
         if ent_text and ent_text not in final_segments:
@@ -327,19 +347,29 @@ def segment_query(query):
         if pp and pp not in final_segments:
             final_segments.append(pp)
     
-    structured_query = " | ".join(final_segments)
+    # Paso 6: Aplicar limpieza de negadores a cada segmento y clasificar en positivos y negativos.
+    final_segments_cleaned = []
+    positive_segments = []
+    negative_segments = []
+    for seg in final_segments:
+        cleaned = remove_negators(seg)
+        final_segments_cleaned.append(cleaned)
+        # Se clasifica como negativo si en el segmento original se detecta algún negador
+        if re.search(NEGATORS_REGEX, seg, re.IGNORECASE):
+            negative_segments.append(cleaned)
+        else:
+            positive_segments.append(cleaned)
     
-    # Paso 6: Para cada segmento, obtener el tipo usando ner_model
+    structured_query = " | ".join(final_segments_cleaned)
+    
+    # Paso 7: Para cada segmento, obtener el tipo usando ner_model.
     types = []
-    for segment in final_segments:
-        seg_type = get_segment_type(segment)
+    for seg in final_segments_cleaned:
+        seg_type = get_segment_type(seg)
         types.append(seg_type)
     
-    print(f"🔹 Segmented query after cleaning: {structured_query}")
-    print(f"🔹 Types per segment: {types}")
-    return structured_query, types
+    return structured_query, types, positive_segments, negative_segments
 
-# El endpoint permanece casi igual:
 @app.route("/structure_query", methods=["POST"])
 def clean_query():
     data = request.get_json()
@@ -347,9 +377,15 @@ def clean_query():
     if not query:
         return jsonify({"error": "Missing 'query' field"}), 400
     print(f"📥 Received query: {query}")
-    structured_query, types = segment_query(query)
+    structured_query, types, positive_segments, negative_segments = segment_query(query)
     print(f"📤 Generated response: {structured_query}")
-    return jsonify({"clear": structured_query, "types": types})
+    return jsonify({
+        "clear": structured_query,
+        "types": types,
+        "positive_segments": positive_segments,
+        "negative_segments": negative_segments
+    })
+
 
 # Endpoint extra para probar únicamente el modelo NER
 @app.route("/test_ner", methods=["POST"])
