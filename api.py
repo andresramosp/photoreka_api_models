@@ -202,7 +202,7 @@ def remove_prefix(query):
             
             if any(similarity.item() > 0.8 for similarity in similarities):
                 print(f"✅ Prefix detected and removed: {segment}")
-                return " ".join(words[n:]).strip()
+                return " ".join(query.split()[n:]).strip()
     
     print("❌ No irrelevant prefix detected.")
     return query
@@ -231,50 +231,76 @@ def remove_duplicate_words(segments):
     
     return unique_segments
 
+def block_named_entities(query, nlp):
+    """
+    Detecta entidades nombradas usando spaCy y reemplaza cada una por un marcador sencillo, por ejemplo: NE1.
+    Devuelve el query modificado y un diccionario con la relación marcador → entidad original.
+    """
+    doc = nlp(query)
+    ne_dict = {}
+    new_query = query
+    for i, ent in enumerate(doc.ents):
+        placeholder = f"NE{i+1}"  # marcador sin llaves
+        ne_dict[placeholder] = ent.text
+        new_query = new_query.replace(ent.text, placeholder)
+    return new_query, ne_dict
+
+def reinsert_named_entities(text, ne_dict):
+    """
+    Reemplaza en el texto los marcadores por la entidad original, según el diccionario.
+    """
+    for placeholder, entity in ne_dict.items():
+        text = text.replace(placeholder, entity)
+    return text
+
 def segment_query(query):
+    # Paso 1: Eliminar el prefijo
     query = remove_prefix(query)
     
-    # Initialize spaCy model
-    nlp = spacy.load("en_core_web_sm")  # Load English model
-    doc = nlp(query)
+    # Inicializamos spaCy (cargamos el modelo)
+    nlp = spacy.load("en_core_web_sm")
+    
+    # Paso 2: Bloquear las entidades nombradas
+    query_blocked, ne_dict = block_named_entities(query, nlp)
+    
+    # Procesamos el query bloqueado
+    doc = nlp(query_blocked)
     
     segments = []
-    used_objects = set()  # Track attached direct objects to avoid duplication
-    
-    for chunk in doc.noun_chunks:  # Extract noun phrases
+    for chunk in doc.noun_chunks:  # Extraemos los sintagmas nominales
         segments.append(chunk.text)
     
-    # Extract verbs and attach them to the closest noun phrase
+    # Paso 3: Adjuntar verbos al sintagma nominal más cercano
     verbs = [token for token in doc if token.pos_ == "VERB"]
-    
-    # Attach direct objects (dobj) without removing subjects (nsubj)
     for verb in verbs:
         closest_chunk = min(doc.noun_chunks, key=lambda chunk: abs(chunk.start - verb.i), default=None)
         if closest_chunk:
-            verb_with_object = f"{closest_chunk.text} {verb.text}"  # Keep subject with verb
+            verb_with_object = f"{closest_chunk.text} {verb.text}"  # Mantenemos el sujeto junto con el verbo
             attached_object = None
             for child in verb.children:
-                if child.dep_ == "dobj":  # Detect direct objects
+                if child.dep_ == "dobj":  # Detectamos objetos directos
                     verb_with_object += f" {child.text}"
                     attached_object = child.text
             
-            # Replace the noun chunk with the verb phrase
             segments[segments.index(closest_chunk.text)] = verb_with_object
             
-            # Remove duplicate object if it exists as a separate segment
             if attached_object and attached_object in segments:
                 segments.remove(attached_object)
     
-    # Clean unnecessary connectors from each segment
+    # Paso 4: Limpiar conectores innecesarios en cada segmento
     cleaned_segments = [clean_segment(segment, nlp) for segment in segments]
     
-    # Remove duplicate words and redundant segments
+    # Paso 5: Eliminar palabras duplicadas y segmentos redundantes
     final_segments = remove_duplicate_words(cleaned_segments)
     
+    # Se unen los segmentos resultantes
     structured_query = " | ".join(final_segments)
+    
+    # Paso 6: Reinsertar las entidades nombradas usando el diccionario
+    structured_query = reinsert_named_entities(structured_query, ne_dict)
+    
     print(f"🔹 Segmented query after cleaning: {structured_query}")
     return structured_query
-
 
 @app.route("/structure_query", methods=["POST"])
 def clean_query():
