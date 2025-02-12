@@ -177,7 +177,6 @@ async def get_embeddings():
 def remove_prefix(query):
     print(f"🔍 Processing query: {query}")
     
-    # Common prefix phrases
     PREFIXES = [
         "photos of", "images of", "pictures of", "I want to see images of", "show me pictures with", 
         "I'm looking for an image of", "I need a photo where", "an image with", "a photo that shows", 
@@ -185,25 +184,20 @@ def remove_prefix(query):
         "photos evoking", "photos reminiscent of", "photos capturing the essence of", "photos reflecting", 
         "photos resonating with", "images resembling", "images similar to", "images inspired by", 
         "images evoking", "images reminiscent of", "pictures resembling", "pictures similar to", 
-        "pictures inspired by", "pictures reflecting", "pictures resonating with"
+        "pictures inspired by", "pictures reflecting", "pictures resonating with", "photos with", "photos including", "images with"
     ]
-
     PREFIX_EMBEDDINGS = embeddings_model.encode(PREFIXES, convert_to_tensor=True)
     
     words = query.lower().split()
-    
-    # Try removing progressive sequences of 2 to 6 words
     for n in range(2, 7):
         if len(words) >= n:
             segment = " ".join(words[:n])
             segment_embedding = embeddings_model.encode(segment, convert_to_tensor=True)
             similarities = util.pytorch_cos_sim(segment_embedding, PREFIX_EMBEDDINGS)[0]
             print(f"🧐 Similarity for segment '{segment}': {similarities.tolist()}")
-            
             if any(similarity.item() > 0.85 for similarity in similarities):
                 print(f"✅ Prefix detected and removed: {segment}")
                 return " ".join(words[n:]).strip()
-    
     print("❌ No irrelevant prefix detected.")
     return query
 
@@ -215,58 +209,51 @@ def clean_segment(segment):
 def remove_duplicate_words(segments):
     unique_segments = []
     seen_words = set()
-    
     for segment in segments:
         words = segment.split()
         filtered_words = []
-        
         for word in words:
             if word not in seen_words:
                 filtered_words.append(word)
                 seen_words.add(word)
-        
         cleaned_segment = " ".join(filtered_words)
         if cleaned_segment:
             unique_segments.append(cleaned_segment)
-    
     return unique_segments
 
 def segment_query(query):
-    query = remove_prefix(query)
+    # Paso 1: Remover prefijo irrelevante
+    query_clean = remove_prefix(query)
+    print(f"Query after prefix removal: {query_clean}")
     
-    doc = nlp(query)
-    
+    # Paso 2: Procesar el query con spaCy para extraer sintagmas y verbos
+    doc = nlp(query_clean)
     segments = []
-    used_objects = set()  # Track attached direct objects to avoid duplication
     
-    for chunk in doc.noun_chunks:  # Extract noun phrases
-        segments.append(chunk.text)
+    # Extraer sintagmas nominales
+    for chunk in doc.noun_chunks:
+        segments.append({"text": chunk.text, "start": chunk.start_char})
     
-    # Extract verbs and attach them to the closest noun phrase
+    # Adjuntar verbos al sintagma nominal más cercano
     verbs = [token for token in doc if token.pos_ == "VERB"]
-    
-    # Attach direct objects (dobj) without removing subjects (nsubj)
     for verb in verbs:
         closest_chunk = min(doc.noun_chunks, key=lambda chunk: abs(chunk.start - verb.i), default=None)
         if closest_chunk:
-            verb_with_object = f"{closest_chunk.text} {verb.text}"  # Keep subject with verb
+            verb_with_object = f"{closest_chunk.text} {verb.text}"
             attached_object = None
             for child in verb.children:
-                if child.dep_ == "dobj":  # Detect direct objects
+                if child.dep_ == "dobj":
                     verb_with_object += f" {child.text}"
                     attached_object = child.text
-            
-            # Replace the noun chunk with the verb phrase
-            segments[segments.index(closest_chunk.text)] = verb_with_object
-            
-            # Remove duplicate object if it exists as a separate segment
-            if attached_object and attached_object in segments:
-                segments.remove(attached_object)
+            # Reemplazar el sintagma nominal en el segmento por la frase ampliada
+            for seg in segments:
+                if seg["text"] == closest_chunk.text:
+                    seg["text"] = verb_with_object
+                    break
+            segments = [seg for seg in segments if seg["text"] != attached_object]
     
-    # Clean unnecessary connectors from each segment
-    cleaned_segments = [clean_segment(segment) for segment in segments]
-    
-    # Remove duplicate words and redundant segments
+    # Paso 3: Limpiar cada segmento y eliminar duplicados
+    cleaned_segments = [clean_segment(seg["text"]) for seg in segments]
     final_segments = remove_duplicate_words(cleaned_segments)
     
     structured_query = " | ".join(final_segments)
@@ -285,7 +272,19 @@ def clean_query():
     print(f"📤 Generated response: {clear_query}")
     return jsonify({"clear": clear_query})
 
-
+# Endpoint extra para probar únicamente el modelo NER
+@app.route("/test_ner", methods=["POST"])
+def test_ner():
+    data = request.get_json()
+    query = data.get("query", "").strip()
+    if not query:
+        return jsonify({"error": "Missing 'query' field"}), 400
+    
+    print(f"🔍 Testing NER for query: {query}")
+    ner_results = ner_model(query)
+    print("NER output:", ner_results)
+    words = [entity["word"] for entity in ner_results]
+    return jsonify({"ner": words})
 
 
 load_wordnet()
