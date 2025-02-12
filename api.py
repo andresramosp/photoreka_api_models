@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 import torch
-from transformers import pipeline
+from transformers import pipeline, AutoTokenizer
 from sentence_transformers import SentenceTransformer, util
 from datasets import Dataset
 from asgiref.wsgi import WsgiToAsgi
@@ -30,7 +30,12 @@ def load_wordnet():
 def load_embeddings_model():
     device = 0 if torch.cuda.is_available() else -1
     embeddings_model = SentenceTransformer('all-mpnet-base-v2', device=device)
-    roberta_classifier_text = pipeline("text-classification", model="roberta-large-mnli", device=device)
+    roberta_classifier_text = pipeline(
+        "text-classification", 
+        model="roberta-large-mnli", 
+        tokenizer=AutoTokenizer.from_pretrained("roberta-large-mnli", use_fast=True), 
+        device=device
+    )
     ner_model = pipeline("ner", model="FacebookAI/xlm-roberta-large-finetuned-conll03-english", aggregation_strategy="simple")
     nlp = spacy.load("en_core_web_sm")
     return embeddings_model, roberta_classifier_text, nlp, ner_model
@@ -66,9 +71,12 @@ def cached_inference(batch_queries, batch_size):
             indexes_to_infer.append(i)
 
     if queries_to_infer:
-        for q in queries_to_infer:
-            print(f"🔍 [INFERENCE] {q}")
-        batch_results = roberta_classifier_text(queries_to_infer, batch_size=batch_size)
+        # print(f"🔍 [INFERENCE] {queries_to_infer}")
+        
+        # Aquí es donde probablemente eliminaste el uso de Dataset
+        dataset = Dataset.from_dict({"query": queries_to_infer})
+        batch_results = roberta_classifier_text(dataset["query"], batch_size=batch_size)
+
         for i, result in zip(indexes_to_infer, batch_results):
             cache[batch_queries[i]] = result
             cached_results.insert(i, result)
@@ -212,7 +220,7 @@ def remove_prefix(query):
             segment = " ".join(words[:n])
             segment_embedding = embeddings_model.encode(segment, convert_to_tensor=True)
             similarities = util.pytorch_cos_sim(segment_embedding, PREFIX_EMBEDDINGS)[0]
-            print(f"🧐 Similarity for segment '{segment}': {similarities.tolist()}")
+            # print(f"🧐 Similarity for segment '{segment}': {similarities.tolist()}")
             if any(similarity.item() > 0.8 for similarity in similarities):
                 print(f"✅ Prefix detected and removed: {segment}")
                 return " ".join(query.split()[n:]).strip()
