@@ -174,6 +174,17 @@ async def get_embeddings():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+def get_segment_type(segment, nlp):
+    """
+    Procesa el segmento con spaCy y, si existe una entidad que cubra la totalidad,
+    devuelve su etiqueta; en caso contrario, devuelve "OTHER".
+    """
+    doc = nlp(segment)
+    for ent in doc.ents:
+        if ent.start_char == 0 and ent.end_char == len(segment):
+            return ent.label_
+    return "OTHER"
+
 def remove_prefix(query):
     print(f"🔍 Processing query: {query}")
     
@@ -224,23 +235,23 @@ def remove_duplicate_words(segments):
             unique_segments.append(cleaned_segment)
     return unique_segments
 
-def extract_named_entities_and_remove(query, nlp):
+def extract_named_entities_and_remove(query):
     """
-    Extrae las entidades nombradas usando spaCy (doc.ents) y las elimina del query.
-    Retorna una tupla: (query_sin_NE, lista_de_NE)
+    Usa ner_model para detectar entidades nombradas y las elimina del query.
+    Retorna una tupla: (query_sin_entidades, lista_completa_de_resultados del NER)
     """
-    doc = nlp(query)
-    ne_list = [ent.text for ent in doc.ents]
+    ner_results = ner_model(query)  # Se espera que cada resultado tenga al menos las claves "word", "score" y "entity_group" (o "label")
+    ne_texts = [res["word"] for res in ner_results]
     query_without_ne = query
-    for ent in ne_list:
+    for ent in ne_texts:
+        # Se realiza un reemplazo simple (case-sensitive)
         query_without_ne = query_without_ne.replace(ent, "")
-    return query_without_ne.strip(), ne_list
+    return query_without_ne.strip(), ner_results
 
 def extract_prepositional_phrases_and_remove(query, nlp):
     """
-    Utiliza el Matcher para detectar secuencias tipo NOUN + ADP + NOUN (posiblemente repetidas)
-    y las elimina del query.
-    Retorna una tupla: (query_sin_PP, lista_de_PP)
+    Usa el Matcher para detectar secuencias tipo NOUN + ADP + NOUN (posiblemente repetidas) y las elimina del query.
+    Retorna: (query_sin_PP, lista_de_frases_pp)
     """
     from spacy.matcher import Matcher
     doc = nlp(query)
@@ -253,14 +264,23 @@ def extract_prepositional_phrases_and_remove(query, nlp):
     matcher.add("PrepositionalPhrase", [pattern])
     matches = matcher(doc)
     pp_list = []
-    # Para evitar problemas con los offsets, se reemplazan las frases de atrás hacia adelante
     query_without_pp = query
     for match_id, start, end in sorted(matches, key=lambda x: x[1], reverse=True):
         span = doc[start:end]
         pp_list.append(span.text)
-        # Reemplazamos la porción extraída por una cadena vacía
         query_without_pp = query_without_pp[:span.start_char] + query_without_pp[span.end_char:]
     return query_without_pp.strip(), pp_list
+
+def get_segment_type(segment):
+    """
+    Usa ner_model para procesar el segmento y, si se detecta una entidad (con buena score) que cubra el segmento,
+    devuelve su etiqueta (entity_group o label); de lo contrario, devuelve "OTHER".
+    """
+    ner_results = ner_model(segment)
+    if ner_results:
+        best = max(ner_results, key=lambda x: x.get("score", 0))
+        return best.get("entity_group", best.get("label", "OTHER"))
+    return "OTHER"
 
 def segment_query(query):
     # Paso 1: Eliminar el prefijo
@@ -270,13 +290,13 @@ def segment_query(query):
     import spacy
     nlp = spacy.load("en_core_web_sm")
     
-    # Paso 2: Bloquear (extraer) las entidades nombradas y eliminarlas del query
-    query_no_ne, ne_list = extract_named_entities_and_remove(query, nlp)
+    # Paso 2: Extraer (bloquear) las entidades nombradas usando ner_model y eliminarlas del query
+    query_no_ne, ner_results = extract_named_entities_and_remove(query)
     
-    # Paso 3: Bloquear (extraer) las frases preposicionales y eliminarlas del query
+    # Paso 3: Extraer (bloquear) las frases preposicionales y eliminarlas del query
     query_clean, pp_list = extract_prepositional_phrases_and_remove(query_no_ne, nlp)
     
-    # Paso 4: Procesar el query limpio (sin las entidades ni las frases preposicionales) para segmentar
+    # Paso 4: Segmentar el query limpio (sin NE ni PP) usando los noun_chunks de spaCy
     doc = nlp(query_clean)
     segments = [chunk.text for chunk in doc.noun_chunks]
     
@@ -298,15 +318,28 @@ def segment_query(query):
     cleaned_segments = [clean_segment(segment, nlp) for segment in segments]
     final_segments = remove_duplicate_words(cleaned_segments)
     
-    # Paso 5: Añadir al final los segmentos bloqueados (las EN y las frases preposicionales)
-    for extra in ne_list + pp_list:
-        if extra and extra not in final_segments:
-            final_segments.append(extra)
+    # Paso 5: Añadir al final los bloques extraídos (las NE y las PP)
+    for res in ner_results:
+        ent_text = res["word"]
+        if ent_text and ent_text not in final_segments:
+            final_segments.append(ent_text)
+    for pp in pp_list:
+        if pp and pp not in final_segments:
+            final_segments.append(pp)
     
     structured_query = " | ".join(final_segments)
+    
+    # Paso 6: Para cada segmento, obtener el tipo usando ner_model
+    types = []
+    for segment in final_segments:
+        seg_type = get_segment_type(segment)
+        types.append(seg_type)
+    
     print(f"🔹 Segmented query after cleaning: {structured_query}")
-    return structured_query
+    print(f"🔹 Types per segment: {types}")
+    return structured_query, types
 
+# El endpoint permanece casi igual:
 @app.route("/structure_query", methods=["POST"])
 def clean_query():
     data = request.get_json()
@@ -314,9 +347,9 @@ def clean_query():
     if not query:
         return jsonify({"error": "Missing 'query' field"}), 400
     print(f"📥 Received query: {query}")
-    structured_query = segment_query(query)
+    structured_query, types = segment_query(query)
     print(f"📤 Generated response: {structured_query}")
-    return jsonify({"clear": structured_query})
+    return jsonify({"clear": structured_query, "types": types})
 
 # Endpoint extra para probar únicamente el modelo NER
 @app.route("/test_ner", methods=["POST"])
