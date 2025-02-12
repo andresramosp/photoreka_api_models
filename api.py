@@ -39,14 +39,19 @@ def preprocess_text(text, to_singular=False):
     lemmatizer = WordNetLemmatizer()
     p = inflect.engine()
     normalized_text = text.lower().replace('_', ' ')
-
+    
     words = normalized_text.split()
+    
     if len(words) == 1:
         lemmatized_word = lemmatizer.lemmatize(normalized_text)
         if to_singular:
             return p.singular_noun(lemmatized_word) or lemmatized_word
         return lemmatized_word
-    return normalized_text
+    
+    if to_singular:
+        words = [p.singular_noun(word) or word for word in words]
+    
+    return ' '.join(words)
 
 def cached_inference(batch_queries, batch_size):
     cached_results = []
@@ -113,7 +118,7 @@ async def adjust_tags_proximities_by_context_inference():
         score = result["score"]
         adjusted_score = score if label == "entailment" and score >= THRESHOLD else -score if label == "contradiction" else 0
         results[tag_name] = {"adjusted_proximity": adjusted_score, "label": label, "score": score}
-        if (label == "entailment"):
+        if (label == "entailment" and score >= THRESHOLD):
             print(f"✅ [TAG MATCH] {tag_name} -> {term}: {label.upper()} con score {score:.4f}")
         # else:
         #     print(f"❌ [MATCH] {tag_name} !-> {term}: {label.upper()} con score {score:.4f}")
@@ -150,7 +155,7 @@ async def adjust_descs_proximities_by_context_inference():
         score = result["score"]
         adjusted_score = score if label == "entailment" and score >= THRESHOLD else -score if label == "contradiction" else 0
         results[chunk_name] = {"adjusted_proximity": adjusted_score, "label": label, "score": score}
-        if (label == "entailment"):
+        if (label == "entailment" and score >= THRESHOLD):
             print(f"✅ [DESC MATCH] {chunk_name} -> {term}: {label.upper()} con score {score:.4f}")
         # else:
         #     print(f"❌ [MATCH] {chunk_name} !-> {term}: {label.upper()} con score {score:.4f}")
@@ -227,12 +232,12 @@ def clean_segment(segment, nlp):
 
 def remove_duplicate_words(segments):
     unique_segments = []
-    seen_words = set()
     for segment in segments:
-        words = segment.split()
+        seen_words = set()
         filtered_words = []
-        for word in words:
-            if word not in seen_words:
+        for word in segment.split():
+            # Siempre conservar la palabra si es negadora
+            if word.lower() in NEGATORS_SET or word not in seen_words:
                 filtered_words.append(word)
                 seen_words.add(word)
         cleaned_segment = " ".join(filtered_words)
@@ -317,12 +322,12 @@ def segment_query(query):
     
     # Paso 4: Segmentar el query limpio usando los noun_chunks de spaCy.
     doc = nlp(query_clean)
-    segments = [chunk.text for chunk in doc.noun_chunks]
-    
-    # Adjuntar verbos al sintagma nominal más cercano (manteniendo el sujeto).
-    verbs = [token for token in doc if token.pos_ == "VERB"]
-    for verb in verbs:
-        closest_chunk = min(doc.noun_chunks, key=lambda chunk: abs(chunk.start - verb.i), default=None)
+    noun_chunks = list(doc.noun_chunks)  # Almacena los chunks una sola vez
+    segments = [chunk.text for chunk in noun_chunks]
+
+    # Adjuntar verbos al sintagma nominal más cercano
+    for verb in [token for token in doc if token.pos_ == "VERB"]:
+        closest_chunk = min(noun_chunks, key=lambda chunk: abs(chunk.start - verb.i), default=None)
         if closest_chunk:
             verb_with_object = f"{closest_chunk.text} {verb.text}"
             attached_object = None
@@ -330,7 +335,12 @@ def segment_query(query):
                 if child.dep_ == "dobj":
                     verb_with_object += f" {child.text}"
                     attached_object = child.text
-            segments[segments.index(closest_chunk.text)] = verb_with_object
+            # Ahora se busca en la lista previamente almacenada
+            try:
+                idx = segments.index(closest_chunk.text)
+                segments[idx] = verb_with_object
+            except ValueError:
+                continue
             if attached_object and attached_object in segments:
                 segments.remove(attached_object)
     
@@ -371,7 +381,7 @@ def segment_query(query):
     return structured_query, types, positive_segments, negative_segments
 
 @app.route("/structure_query", methods=["POST"])
-def clean_query():
+def structure_query():
     data = request.get_json()
     query = data.get("query", "").strip()
     if not query:
