@@ -184,13 +184,12 @@ def remove_prefix(query):
         "I would like to explore pictures of", "photos resembling", "photos similar to", "photos inspired by", 
         "photos evoking", "photos reminiscent of", "photos capturing the essence of", "photos reflecting", 
         "photos resonating with", "images resembling", "images similar to", "images inspired by", 
-        "images evoking", "images reminiscent of", "pictures resembling", "pictures similar to", 
+        "images evoking", "images reminiscent of", "pictures resembling", "pictures similar to", "photos featuring", "images featuring"
         "pictures inspired by", "pictures reflecting", "pictures resonating with", "images for a project", "images for a series"
     ]
     PREFIX_EMBEDDINGS = embeddings_model.encode(PREFIXES, convert_to_tensor=True)
     
     words = query.lower().split()
-    
     # Try removing progressive sequences of 2 to 6 words
     for n in range(2, 7):
         if len(words) >= n:
@@ -200,9 +199,8 @@ def remove_prefix(query):
             print(f"🧐 Similarity for segment '{segment}': {similarities.tolist()}")
             if any(similarity.item() > 0.8 for similarity in similarities):
                 print(f"✅ Prefix detected and removed: {segment}")
-                # Usamos la versión original para mantener la capitalización
+                # Se usa la versión original para mantener la capitalización
                 return " ".join(query.split()[n:]).strip()
-    
     print("❌ No irrelevant prefix detected.")
     return query
 
@@ -226,24 +224,23 @@ def remove_duplicate_words(segments):
             unique_segments.append(cleaned_segment)
     return unique_segments
 
-def block_named_entities(query, nlp):
+def extract_named_entities_and_remove(query, nlp):
     """
-    Detecta entidades nombradas usando spaCy (doc.ents) y las reemplaza por marcadores sencillos (ej. NE1).
-    Retorna el query modificado y un diccionario {marcador: entidad_original}.
+    Extrae las entidades nombradas usando spaCy (doc.ents) y las elimina del query.
+    Retorna una tupla: (query_sin_NE, lista_de_NE)
     """
     doc = nlp(query)
-    ne_dict = {}
-    new_query = query
-    for i, ent in enumerate(doc.ents):
-        placeholder = f"NE{i+1}"
-        ne_dict[placeholder] = ent.text
-        new_query = new_query.replace(ent.text, placeholder)
-    return new_query, ne_dict
+    ne_list = [ent.text for ent in doc.ents]
+    query_without_ne = query
+    for ent in ne_list:
+        query_without_ne = query_without_ne.replace(ent, "")
+    return query_without_ne.strip(), ne_list
 
-def block_prepositional_phrases(query, nlp):
+def extract_prepositional_phrases_and_remove(query, nlp):
     """
-    Utiliza el Matcher para detectar secuencias del tipo NOUN + ADP + NOUN (con posibles repeticiones)
-    y las reemplaza por un marcador sencillo (ej. PP0_3). Retorna el query modificado y un diccionario {marcador: frase_original}.
+    Utiliza el Matcher para detectar secuencias tipo NOUN + ADP + NOUN (posiblemente repetidas)
+    y las elimina del query.
+    Retorna una tupla: (query_sin_PP, lista_de_PP)
     """
     from spacy.matcher import Matcher
     doc = nlp(query)
@@ -255,48 +252,35 @@ def block_prepositional_phrases(query, nlp):
     ]
     matcher.add("PrepositionalPhrase", [pattern])
     matches = matcher(doc)
-    pp_dict = {}
-    new_query = query
-    # Procesamos en orden inverso de posición para no afectar los índices
+    pp_list = []
+    # Para evitar problemas con los offsets, se reemplazan las frases de atrás hacia adelante
+    query_without_pp = query
     for match_id, start, end in sorted(matches, key=lambda x: x[1], reverse=True):
         span = doc[start:end]
-        placeholder = f"PP{start}_{end}"
-        pp_dict[placeholder] = span.text
-        start_char = span.start_char
-        end_char = span.end_char
-        new_query = new_query[:start_char] + placeholder + new_query[end_char:]
-    return new_query, pp_dict
-
-def reinsert_named_entities(text, ne_dict):
-    for placeholder, entity in ne_dict.items():
-        text = text.replace(placeholder, entity)
-    return text
-
-def reinsert_prepositional_phrases(text, pp_dict):
-    for placeholder, phrase in pp_dict.items():
-        text = text.replace(placeholder, phrase)
-    return text
+        pp_list.append(span.text)
+        # Reemplazamos la porción extraída por una cadena vacía
+        query_without_pp = query_without_pp[:span.start_char] + query_without_pp[span.end_char:]
+    return query_without_pp.strip(), pp_list
 
 def segment_query(query):
     # Paso 1: Eliminar el prefijo
     query = remove_prefix(query)
     
-    # Inicializar spaCy (se asume que 'spacy' y 'nlp' no se cargan globalmente en este ejemplo)
+    # Inicializar spaCy
+    import spacy
     nlp = spacy.load("en_core_web_sm")
     
-    # Paso 2: Bloquear las entidades nombradas
-    query_blocked, ne_dict = block_named_entities(query, nlp)
+    # Paso 2: Bloquear (extraer) las entidades nombradas y eliminarlas del query
+    query_no_ne, ne_list = extract_named_entities_and_remove(query, nlp)
     
-    # Paso 3: Bloquear las unidades preposicionales
-    query_blocked, pp_dict = block_prepositional_phrases(query_blocked, nlp)
+    # Paso 3: Bloquear (extraer) las frases preposicionales y eliminarlas del query
+    query_clean, pp_list = extract_prepositional_phrases_and_remove(query_no_ne, nlp)
     
-    # Procesar el query bloqueado con spaCy para segmentar
-    doc = nlp(query_blocked)
-    segments = []
-    for chunk in doc.noun_chunks:
-        segments.append(chunk.text)
+    # Paso 4: Procesar el query limpio (sin las entidades ni las frases preposicionales) para segmentar
+    doc = nlp(query_clean)
+    segments = [chunk.text for chunk in doc.noun_chunks]
     
-    # (Opcional: aquí se conserva la parte de adjuntar verbos, si se requiere)
+    # Adjuntar verbos al sintagma nominal más cercano (manteniendo el sujeto)
     verbs = [token for token in doc if token.pos_ == "VERB"]
     for verb in verbs:
         closest_chunk = min(doc.noun_chunks, key=lambda chunk: abs(chunk.start - verb.i), default=None)
@@ -314,12 +298,12 @@ def segment_query(query):
     cleaned_segments = [clean_segment(segment, nlp) for segment in segments]
     final_segments = remove_duplicate_words(cleaned_segments)
     
+    # Paso 5: Añadir al final los segmentos bloqueados (las EN y las frases preposicionales)
+    for extra in ne_list + pp_list:
+        if extra and extra not in final_segments:
+            final_segments.append(extra)
+    
     structured_query = " | ".join(final_segments)
-    
-    # Paso 4: Reinsertar las entidades y las unidades preposicionales bloqueadas
-    structured_query = reinsert_named_entities(structured_query, ne_dict)
-    structured_query = reinsert_prepositional_phrases(structured_query, pp_dict)
-    
     print(f"🔹 Segmented query after cleaning: {structured_query}")
     return structured_query
 
@@ -333,7 +317,6 @@ def clean_query():
     structured_query = segment_query(query)
     print(f"📤 Generated response: {structured_query}")
     return jsonify({"clear": structured_query})
-
 
 # Endpoint extra para probar únicamente el modelo NER
 @app.route("/test_ner", methods=["POST"])
