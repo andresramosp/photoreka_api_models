@@ -35,7 +35,7 @@ def load_embeddings_model():
     print("GPU Count:", torch.cuda.device_count())
     if torch.cuda.is_available():
         print("Using GPU:", torch.cuda.get_device_name(0))
-        
+
     device = 0 if torch.cuda.is_available() else -1
     embeddings_model = SentenceTransformer('all-mpnet-base-v2', device=device)
     roberta_classifier_text = pipeline(
@@ -280,8 +280,8 @@ def remove_negators(segment):
     return cleaned
 
 def segment_query(query):
-    query = remove_prefix(query)
-    query_no_ne, ner_results = extract_named_entities_and_remove(query)
+    query_no_prefix = remove_prefix(query)
+    query_no_ne, ner_results = extract_named_entities_and_remove(query_no_prefix)
     query_clean, pp_list = extract_prepositional_phrases_and_remove(query_no_ne)
     doc = nlp(query_clean)
     noun_chunks = list(doc.noun_chunks)
@@ -328,7 +328,7 @@ def segment_query(query):
     
     structured_query = " | ".join(final_segments_cleaned)
     types = [get_segment_type(seg) for seg in final_segments_cleaned]
-    return structured_query, types, positive_segments, negative_segments
+    return structured_query, types, positive_segments, negative_segments, query_no_prefix
 
 @app.post("/structure_query")
 async def structure_query(request: Request):
@@ -337,27 +337,36 @@ async def structure_query(request: Request):
     if not query:
         raise HTTPException(status_code=400, detail="Missing 'query' field")
     print(f"📥 Received query: {query}")
-    structured_query_str, types, positive_segments, negative_segments = segment_query(query)
+    structured_query_str, types, positive_segments, negative_segments, query_no_prefix = segment_query(query)
     print(f"📤 Generated response: {structured_query_str}")
     return JSONResponse(content={
         "clear": structured_query_str,
+        "no_prefix": query_no_prefix,
         "types": types,
         "positive_segments": positive_segments,
         "negative_segments": negative_segments
     })
 
-@app.post("/test_ner")
-async def test_ner(request: Request):
+@app.post("/")
+async def proxy_handler(request: Request):
     data = await request.json()
-    query = data.get("query", "").strip()
-    if not query:
-        raise HTTPException(status_code=400, detail="Missing 'query' field")
-    
-    print(f"🔍 Testing NER for query: {query}")
-    ner_results = ner_model(query)
-    print("NER output:", ner_results)
-    words = [entity["word"] for entity in ner_results]
-    return JSONResponse(content={"ner": words})
+
+    action = data.get("action")
+    if not action:
+        return JSONResponse({"error": "Missing 'action' field"}, status_code=400)
+
+    # Reenviar a la función correcta según el action
+    if action == "structure_query":
+        return await structure_query(request)
+    elif action == "get_embeddings":
+        return await get_embeddings(request)
+    elif action == "adjust_tags_proximities_by_context_inference":
+        return await adjust_tags_proximities_by_context_inference(request)
+    elif action == "adjust_descs_proximities_by_context_inference":
+        return await adjust_descs_proximities_by_context_inference(request)
+
+
+    return JSONResponse({"error": f"Unknown action '{action}'"}, status_code=400)
 
 # Inicializar recursos
 load_wordnet()
