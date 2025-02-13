@@ -28,6 +28,14 @@ def load_wordnet():
         nltk.download('omw-1.4')
 
 def load_embeddings_model():
+
+    print("PyTorch version:", torch.__version__)
+    print("CUDA available:", torch.cuda.is_available())
+    print("CUDA version:", torch.version.cuda)
+    print("GPU Count:", torch.cuda.device_count())
+    if torch.cuda.is_available():
+        print("Using GPU:", torch.cuda.get_device_name(0))
+        
     device = 0 if torch.cuda.is_available() else -1
     embeddings_model = SentenceTransformer('all-mpnet-base-v2', device=device)
     roberta_classifier_text = pipeline(

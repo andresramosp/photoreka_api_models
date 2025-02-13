@@ -1,0 +1,13 @@
+flask
+torch
+torchvision
+torchaudio
+transformers
+sentence-transformers
+datasets
+asgiref
+uvicorn
+nltk
+inflect
+spacy
+cachetools
