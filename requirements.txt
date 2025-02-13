@@ -2,6 +2,7 @@ flask
 fastapi
 torch
 torchvision
+runpod
 torchaudio
 transformers
 sentence-transformers
