@@ -35,4 +35,4 @@ ENV MODEL_PATH="/app/models/all-mpnet-base-v2"
 EXPOSE 7860
 
 # Ejecutar la API con Uvicorn
-CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "7860"]
+CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
