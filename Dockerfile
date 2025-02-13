@@ -31,8 +31,5 @@ RUN python -c "from transformers import pipeline; \
 # Definir variables de entorno
 ENV MODEL_PATH="/app/models/all-mpnet-base-v2"
 
-# Exponer el puerto de la API
-EXPOSE 7860
-
-# Ejecutar la API con Uvicorn
-CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
+# Ejecutar directamente el handler de RunPod Serverless
+CMD ["python", "serverless.py"]

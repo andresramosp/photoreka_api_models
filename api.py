@@ -207,35 +207,5 @@ async def structure_query(request: Request):
 load_wordnet()
 embeddings_model, roberta_classifier_text, nlp, ner_model = load_embeddings_model()
 
-# --- Configuración para RunPod Serverless ---
-if os.getenv("RUNPOD_SERVERLESS", "false").lower() == "true":
-    import runpod
-
-    def handler(job):
-        input_data = job.get("input", {})
-        operation = input_data.get("operation")
-        if not operation:
-            return {"error": "Missing 'operation' in input"}
-        try:
-            if operation == "adjust_tags_proximities_by_context_inference":
-                data = input_data.get("data", {})
-                result = adjust_tags_proximities_by_context_inference_logic(data)
-            elif operation == "adjust_descs_proximities_by_context_inference":
-                data = input_data.get("data", {})
-                result = adjust_descs_proximities_by_context_inference_logic(data)
-            elif operation == "get_embeddings":
-                data = input_data.get("data", {})
-                result = get_embeddings_logic(data)
-            elif operation == "structure_query":
-                data = input_data.get("data", {})
-                result = structure_query_logic(data)
-            else:
-                result = {"error": f"Operation '{operation}' not supported"}
-        except Exception as e:
-            result = {"error": str(e)}
-        return result
-
-    runpod.serverless.start({"handler": handler})
-
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=5000, reload=True)
