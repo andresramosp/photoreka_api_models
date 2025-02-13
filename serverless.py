@@ -3,7 +3,7 @@ from api import (
     adjust_tags_proximities_by_context_inference_logic,
     adjust_descs_proximities_by_context_inference_logic,
     get_embeddings_logic,
-    structure_query
+    structure_query_logic
 )
 
 async def handler(job):
@@ -25,7 +25,7 @@ async def handler(job):
             result = get_embeddings_logic(data)
         elif operation == "structure_query":
             data = input_data.get("data", {})
-            result = structure_query(data)
+            result = structure_query_logic(data)
         else:
             result = {"error": f"Operation '{operation}' not supported"}
     except Exception as e:
