@@ -69,8 +69,10 @@ def cached_inference(batch_queries, batch_size):
             queries_to_infer.append(query)
             indexes_to_infer.append(i)
 
+
     if queries_to_infer:
         dataset = Dataset.from_dict({"query": queries_to_infer})
+        # print(queries_to_infer)
         batch_results = roberta_classifier_text(dataset["query"], batch_size=batch_size)
         for i, result in zip(indexes_to_infer, batch_results):
             cache[batch_queries[i]] = result
@@ -87,6 +89,8 @@ def combine_tag_name_with_group(tag):
         return f"{tag['name']} (place)"
     if tag.get("group") == "generic":
         return f"{tag['name']} (as general topic)"
+    if tag.get("group") == "theme":
+        return f"{tag['name']} (as general theme)"
     if tag.get("group") == "objects":
         return f"{tag['name']} (physical thing)"
     return tag["name"]
@@ -241,12 +245,12 @@ def segment_query(query):
 def adjust_tags_proximities_by_context_inference_logic(data: dict):
     start_time = time.perf_counter()
     BATCH_SIZE = 128
-    THRESHOLD = 0.82
+    THRESHOLD = 0 # 0.82
 
     term = preprocess_text(data.get("term", ""), True)
     tag_list = data.get("tag_list", [])
-    premise_wrapper = data.get("premise_wrapper", "The photo featured {term}")
-    hypothesis_wrapper = data.get("hypothesis_wrapper", "The photo featured {term}")
+    premise_wrapper = data.get("premise_wrapper", "the photo featured {term}")
+    hypothesis_wrapper = data.get("hypothesis_wrapper", "the photo featured {term}")
 
     if not term or not tag_list:
         raise ValueError("Missing required fields (term, tag_list)")
@@ -272,7 +276,7 @@ def adjust_tags_proximities_by_context_inference_logic(data: dict):
 
 def adjust_descs_proximities_by_context_inference_logic(data: dict):
     BATCH_SIZE = 128
-    THRESHOLD = 0.55
+    THRESHOLD = 0 # 0.55
 
     term = preprocess_text(data.get("term", ""), True)
     chunk_list = data.get("tag_list", [])

@@ -6,6 +6,7 @@ from api import (
     structure_query_logic
 )
 
+# cambio
 async def handler(job):
     input_data = job.get("input", {})
     operation = input_data.get("operation")
