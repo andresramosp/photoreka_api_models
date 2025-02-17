@@ -245,7 +245,6 @@ def segment_query(query):
 def adjust_tags_proximities_by_context_inference_logic(data: dict):
     start_time = time.perf_counter()
     BATCH_SIZE = 128
-    THRESHOLD = 0 # 0.82
 
     term = preprocess_text(data.get("term", ""), True)
     tag_list = data.get("tag_list", [])
@@ -266,17 +265,25 @@ def adjust_tags_proximities_by_context_inference_logic(data: dict):
     for tag_name, result in zip(tag_names, batch_results):
         label = result["label"].lower()
         score = result["score"]
-        adjusted_score = score if label == "entailment" and score >= THRESHOLD else -score if label == "contradiction" else 0
+        if label == "entailment":
+            adjusted_score = 1 + score         # 0 a 1
+        elif label == "neutral":
+            adjusted_score = score        # -1 a 0
+        elif label == "contradiction":
+            adjusted_score = - score    # -2 a -1
+        else:
+            adjusted_score = 0
+
         results[tag_name] = {"adjusted_proximity": adjusted_score, "label": label, "score": score}
-        if label == "entailment" and score >= THRESHOLD:
+        if label == "entailment":
             print(f"✅ [TAG MATCH] {tag_name} -> {term}: {label.upper()} con score {score:.4f}")
 
     print(f"⏳ Tiempo de ejecución: {time.perf_counter() - start_time:.4f} segundos")
     return results
 
+
 def adjust_descs_proximities_by_context_inference_logic(data: dict):
     BATCH_SIZE = 128
-    THRESHOLD = 0 # 0.55
 
     term = preprocess_text(data.get("term", ""), True)
     chunk_list = data.get("tag_list", [])
@@ -297,12 +304,21 @@ def adjust_descs_proximities_by_context_inference_logic(data: dict):
     for chunk_name, result in zip(chunk_names, batch_results):
         label = result["label"].lower()
         score = result["score"]
-        adjusted_score = score if label == "entailment" and score >= THRESHOLD else -score if label == "contradiction" else 0
+        if label == "entailment":
+            adjusted_score = 1 + score         # 0 a 1
+        elif label == "neutral":
+            adjusted_score = score        # -1 a 0
+        elif label == "contradiction":
+            adjusted_score = - score    # -2 a -1
+        else:
+            adjusted_score = 0
+
         results[chunk_name] = {"adjusted_proximity": adjusted_score, "label": label, "score": score}
-        if label == "entailment" and score >= THRESHOLD:
+        if label == "entailment":
             print(f"✅ [DESC MATCH] {chunk_name} -> {term}: {label.upper()} con score {score:.4f}")
 
     return results
+
 
 def get_embeddings_logic(data: dict):
     tags = data.get("tags", [])
