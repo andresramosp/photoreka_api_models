@@ -30,16 +30,18 @@ def load_wordnet():
 def load_embeddings_model():
     print("PyTorch version:", torch.__version__)
     print("CUDA available:", torch.cuda.is_available())
-    device = 0 if torch.cuda.is_available() else -1
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
     embeddings_model = SentenceTransformer('all-mpnet-base-v2', device=device)
     roberta_classifier_text = pipeline(
         "text-classification", 
         model="roberta-large-mnli", 
         tokenizer=AutoTokenizer.from_pretrained("roberta-large-mnli", use_fast=True), 
-        device=device
+        device=0 if device == "cuda" else -1  # `pipeline` usa -1 para CPU
     )
-    ner_model = pipeline("ner", model="FacebookAI/xlm-roberta-large-finetuned-conll03-english", aggregation_strategy="simple")
+    ner_model = pipeline("ner", model="FacebookAI/xlm-roberta-large-finetuned-conll03-english", aggregation_strategy="simple", device=0 if device == "cuda" else -1)
     nlp = spacy.load("en_core_web_sm")
+
     return embeddings_model, roberta_classifier_text, nlp, ner_model
 
 def preprocess_text(text, to_singular=False):
@@ -69,15 +71,16 @@ def cached_inference(batch_queries, batch_size):
             queries_to_infer.append(query)
             indexes_to_infer.append(i)
 
-
     if queries_to_infer:
         dataset = Dataset.from_dict({"query": queries_to_infer})
-        # print(queries_to_infer)
-        batch_results = roberta_classifier_text(dataset["query"], batch_size=batch_size)
+        # Se utiliza un contexto sin gradientes para optimizar la inferencia
+        with torch.inference_mode():
+            batch_results = roberta_classifier_text(dataset["query"], batch_size=batch_size)
         for i, result in zip(indexes_to_infer, batch_results):
             cache[batch_queries[i]] = result
             cached_results.insert(i, result)
     return cached_results
+
 
 # Función auxiliar movida fuera del endpoint
 def combine_tag_name_with_group(tag):
@@ -269,10 +272,8 @@ def adjust_tags_proximities_by_context_inference_logic(data: dict):
             adjusted_score = 1 + score         # 0 a 1
         elif label == "neutral":
             adjusted_score = score        # -1 a 0
-        elif label == "contradiction":
-            adjusted_score = - score    # -2 a -1
         else:
-            adjusted_score = 0
+            adjusted_score = -score
 
         results[tag_name] = {"adjusted_proximity": adjusted_score, "label": label, "score": score}
         if label == "entailment":
