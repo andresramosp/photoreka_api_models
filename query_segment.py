@@ -4,7 +4,9 @@ from nltk.corpus import wordnet as wn
 import nltk
 from nltk.stem import WordNetLemmatizer
 import uvicorn
+from transformers import pipeline
 import spacy
+import re
 from sentence_transformers import SentenceTransformer, util
 
 
@@ -14,6 +16,7 @@ nltk.download("omw-1.4")
 embeddings_model = SentenceTransformer('all-mpnet-base-v2', device=0)
 lemmatizer = WordNetLemmatizer()
 nlp = spacy.load("en_core_web_sm", disable=["parser", "ner"])  # Solo usamos POS tagging
+ner_model = pipeline("ner", model="FacebookAI/xlm-roberta-large-finetuned-conll03-english", aggregation_strategy="simple", device=0)
 
 app = FastAPI()
 
@@ -67,29 +70,20 @@ def get_pos_spacy_no_context(word):
 
 def get_pos_spacy(word: str, sentence: str = None) -> str:
     if sentence:
-        print("DEBUG: Analizando la oración completa:", sentence)
         doc = nlp(sentence)
-        print("DEBUG: Tokens de la oración:")
-        for token in doc:
-            print(f"    Token: '{token.text}' - POS: {token.pos_}")
         # Buscar el token que coincida con la palabra
         for token in doc:
             if token.text.lower() == word.lower():
-                print(f"DEBUG: Coincidencia encontrada para '{word}': Token '{token.text}' con POS: {token.pos_}")
                 pos = token.pos_
                 final_pos = pos if pos in ["ADJ", "NOUN", "VERB", "ADV", "ADP"] else "UNKNOWN"
-                print(f"DEBUG: Retornando: {final_pos}")
                 return final_pos
-        print(f"DEBUG: La palabra '{word}' no se encontró en la oración. Se analizará de forma aislada.")
     else:
         print("DEBUG: No se proporcionó oración; analizando la palabra de forma aislada.")
     
     # Análisis aislado
     doc = nlp(word)
-    print("DEBUG: Token aislado:", doc[0].text, "con POS:", doc[0].pos_)
     pos = doc[0].pos_
     final_pos = pos if pos in ["ADJ", "NOUN", "VERB", "ADV", "ADP"] else "UNKNOWN"
-    print(f"DEBUG: Retornando: {final_pos}")
     return final_pos
 
 # Funciones para determinar la categoría gramatical de una palabra con WordNet y Spacy como respaldo
@@ -112,20 +106,20 @@ def is_adverb(word, query):
 def is_preposition(word, query):
     return word in {"of"}
 
+
 # Lista de estructuras de segmentos a detectar
 patterns = [
     ("ADJ_NOUN", [is_adjective, is_noun]),  # lazy girl
     ("NOUN_ADJ", [is_noun, is_adjective]),  # market sunny
-
     ("ADJ_NOUN_VERB", [is_adjective, is_noun, is_verb]),  # lazy girl sleeping
     ("NOUN_PREP_NOUN", [is_noun, is_preposition, is_noun]),  # concept of chaos
     ("NOUN_VERB", [is_noun, is_verb]),  # girl sleeping
-     ("NOUN_NOUN", [is_noun, is_noun]),  # farm animals
+    ("NOUN_NOUN", [is_noun, is_noun]),  # farm animals
     ("NOUN_VERB_CD", [is_noun, is_verb, is_noun]),  # girl eating icecream
     ("NOUN_VERB_ADJ_NOUN", [is_noun, is_verb, is_adjective, is_noun]),  # girl eating nice icecream
     ("NOUN_VERB_ADJ", [is_noun, is_verb, is_adjective]),  # girl working hard
     ("VERB_ALONE", [is_verb]),  # sleeping
-    ("NOUN_ALONE", [is_noun])  # girl
+    ("NOUN_ALONE", [is_noun]),  # girl
 ]
 
 def split_query_with_connectors(query: str):
@@ -149,11 +143,39 @@ def split_query_with_connectors(query: str):
     
     return segments
 
+def block_er_entities(query: str, use_model: bool = False) -> str:
+    """
+    Procesa la query para identificar entidades nombradas y las bloquea envolviéndolas en corchetes,
+    de modo que no se procesen en etapas posteriores.
+    
+    Parámetros:
+      - query: cadena de texto original.
+      - use_model: si es True se usará el modelo de HuggingFace (ner_model, previamente instanciado) para detectar entidades;
+                   si es False se aplicará una heurística que detecta secuencias de dos o más palabras que inician en mayúscula.
+    
+    Retorna:
+      La query con las entidades detectadas bloqueadas entre corchetes.
+    """
+    if use_model:
+        # Se asume que ner_model está definido globalmente
+        entities = ner_model(query)
+        # Ordenar las entidades de forma descendente según su posición para evitar problemas al reemplazar
+        for ent in sorted(entities, key=lambda x: x['start'], reverse=True):
+            start, end = ent['start'], ent['end']
+            query = query[:start] + f"[{query[start:end]}]" + query[end:]
+        return query
+    else:
+        # Heurística: buscamos secuencias de dos o más palabras que comienzan con mayúscula.
+        pattern = r'\b(?:[A-Z][a-z]*(?:\s+[A-Z][a-z]*)+)\b'
+        return re.sub(pattern, lambda m: f"[{m.group(0)}]", query)
+
 def preprocess_query(query: str):
     no_prefix_query = remove_photo_prefix(query)
     print(f" No-prefix query: {no_prefix_query}")
 
-    clean_query = remove_dumb_connectors(no_prefix_query)
+    blocked_er_query = block_er_entities(no_prefix_query)
+
+    clean_query = remove_dumb_connectors(blocked_er_query)
     print(f" Clean query: {clean_query}")
 
     splitted_query = split_query_with_connectors(clean_query)
