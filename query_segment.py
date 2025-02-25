@@ -5,11 +5,13 @@ import nltk
 from nltk.stem import WordNetLemmatizer
 import uvicorn
 import spacy
+from sentence_transformers import SentenceTransformer, util
+
 
 # Descargar datos de WordNet si no están disponibles
 nltk.download("wordnet")
 nltk.download("omw-1.4")
-
+embeddings_model = SentenceTransformer('all-mpnet-base-v2', device=0)
 lemmatizer = WordNetLemmatizer()
 nlp = spacy.load("en_core_web_sm", disable=["parser", "ner"])  # Solo usamos POS tagging
 
@@ -21,6 +23,41 @@ class QueryRequest(BaseModel):
 
 # Lista de conectores para dividir la query
 CONNECTORS = {"in", "at", "with", "near", "on", "under", "over", "between", "and"}
+
+
+
+def remove_photo_prefix(query: str):
+    print(f"🔍 Processing query: {query}")
+    PREFIXES = [
+        "photos ", "photos of", "images of", "pictures of", "I want to see images of", "show me pictures with", 
+        "I'm looking for an image of", "I need a photo where", "an image with", "a photo that shows", 
+        "I would like to explore pictures of", "photos resembling", "photos similar to", "photos inspired by", 
+        "photos evoking", "photos reminiscent of", "photos capturing the essence of", "photos reflecting", 
+        "photos resonating with", "images resembling", "images similar to", "images inspired by", 
+        "images evoking", "images reminiscent of", "pictures resembling", "pictures similar to", "photos featuring", "images featuring",
+        "pictures inspired by", "pictures reflecting", "pictures resonating with", "images for a project", "images for a series"
+    ]
+    PREFIX_EMBEDDINGS = embeddings_model.encode(PREFIXES, convert_to_tensor=True)
+    words = query.lower().split()
+    for n in range(2, 7):
+        if len(words) >= n:
+            segment = " ".join(words[:n])
+            segment_embedding = embeddings_model.encode(segment, convert_to_tensor=True)
+            similarities = util.pytorch_cos_sim(segment_embedding, PREFIX_EMBEDDINGS)[0]
+            if any(similarity.item() > 0.8 for similarity in similarities):
+                print(f"✅ Prefix detected and removed: {segment}")
+                return " ".join(query.split()[n:]).strip()
+    print("❌ No irrelevant prefix detected.")
+    return query
+
+def remove_dumb_connectors(query: str):
+    DUMB_CONNECTORS = {"a", "an", "the", "some", "any", "this", "that", "these", "those", "my", "your", "his", "her", "its", "our", "their", "one", "two", "few", "several", "many", "much", "each", "every", "either", "neither", "another", "such"}
+    
+    words = query.split()
+    filtered_words = [word for word in words if word.lower() not in DUMB_CONNECTORS]
+    
+    return " ".join(filtered_words)
+
 
 # Función de respaldo con Spacy para etiquetar palabras desconocidas
 def get_pos_spacy(word):
@@ -50,17 +87,17 @@ def is_preposition(word):
 
 # Lista de estructuras de segmentos a detectar
 patterns = [
-    ("ADJ_NOUN", [is_adjective, is_noun]),  # Adjetivo + Sustantivo
-    ("NOUN_PREP_NOUN", [is_noun, is_preposition, is_noun]),  # Sustantivo + Preposición + Sustantivo
-    ("NOUN_VERB", [is_noun, is_verb]),  # Sustantivo + Verbo
-    ("NOUN_VERB_CD", [is_noun, is_verb, is_noun]),  # Sustantivo + Verbo + CD
-    ("NOUN_VERB_ADJ", [is_noun, is_verb, is_adjective]),  # Sustantivo + Verbo + Adjetivo
-    ("ADV_ADJ_NOUN", [is_adverb, is_adjective, is_noun]),  # Adverbio + Adjetivo + Sustantivo
-    ("VERB_ALONE", [is_verb]),  # Verbo solo (gerundios, acciones sueltas)
-    ("NOUN_ALONE", [is_noun])  # Sustantivo solo
+    ("ADJ_NOUN", [is_adjective, is_noun]),  # lazy girl
+    ("ADJ_NOUN_VERB", [is_adjective, is_noun, is_verb]),  # lazy girl sleeping
+    ("NOUN_PREP_NOUN", [is_noun, is_preposition, is_noun]),  # concept of chaos
+    ("NOUN_VERB", [is_noun, is_verb]),  # girl sleeping
+    ("NOUN_VERB_CD", [is_noun, is_verb, is_noun]),  # girl eating icecream
+    ("NOUN_VERB_ADJ", [is_noun, is_verb, is_adjective]),  # girl working hard
+    ("VERB_ALONE", [is_verb]),  # sleeping
+    ("NOUN_ALONE", [is_noun])  # girl
 ]
 
-def preprocess_query(query: str):
+def split_query_with_connectors(query: str):
     words = query.lower().replace(",", "").split()
     segments = []
     current_segment = []
@@ -80,6 +117,16 @@ def preprocess_query(query: str):
 
     
     return segments
+
+def preprocess_query(query: str):
+    no_prefix_query = remove_photo_prefix(query)
+    print(f" No-prefix query: {no_prefix_query}")
+
+    clean_query = remove_dumb_connectors(no_prefix_query)
+    print(f" Clean query: {clean_query}")
+
+    splitted_query = split_query_with_connectors(clean_query)
+    return splitted_query
 
 def segment_query_v2(query: str) -> str:
     preprocessed_segments = preprocess_query(query)
