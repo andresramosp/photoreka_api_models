@@ -1,47 +1,25 @@
-from fastapi import FastAPI
 from pydantic import BaseModel
-from nltk.corpus import wordnet as wn
-import nltk
-from nltk.stem import WordNetLemmatizer
-import uvicorn
-from transformers import pipeline
-import spacy
 import re
 from itertools import cycle
-from sentence_transformers import SentenceTransformer, util
+from nltk.corpus import wordnet as wn
+from nltk.stem import WordNetLemmatizer
+from sentence_transformers import util
 
+# Importar dependencias comunes desde api.py
+from api import embeddings_model, nlp, ner_model
 
-# Descargar datos de WordNet si no están disponibles
-nltk.download("wordnet")
-nltk.download("omw-1.4")
-embeddings_model = SentenceTransformer('all-mpnet-base-v2', device=0)
+# Instanciar lemmatizer una única vez
 lemmatizer = WordNetLemmatizer()
-nlp = spacy.load("en_core_web_sm", disable=["parser", "ner"])  # Solo usamos POS tagging
-ner_model = pipeline("ner", model="FacebookAI/xlm-roberta-large-finetuned-conll03-english", aggregation_strategy="simple", device=0)
 
-app = FastAPI()
-
+# Clase de ejemplo, en caso de necesitarla para validación o uso en otros módulos
 class QueryRequest(BaseModel):
     query: str
 
 
-# Lista de conectores para dividir la query
-CONNECTORS = {"in", "at", "with", "near", "on", "under", "over", "between", "and"}
-
-
-
 def remove_photo_prefix(query: str):
     print(f"🔍 Processing query: {query}")
-    PREFIXES = [
-        "photos ", "photos of", "images of", "pictures of", "I want to see images of", "show me pictures with", 
-        "I'm looking for an image of", "I need a photo where", "an image with", "a photo that shows", 
-        "I would like to explore pictures of", "photos resembling", "photos similar to", "photos inspired by", 
-        "photos evoking", "photos reminiscent of", "photos capturing the essence of", "photos reflecting", 
-        "photos resonating with", "images resembling", "images similar to", "images inspired by", 
-        "images evoking", "images reminiscent of", "pictures resembling", "pictures similar to", "photos featuring", "images featuring",
-        "pictures inspired by", "pictures reflecting", "pictures resonating with", "images for a project", "images for a series"
-    ]
-    PREFIX_EMBEDDINGS = embeddings_model.encode(PREFIXES, convert_to_tensor=True)
+
+    PREFIX_EMBEDDINGS = embeddings_model.encode(QUERY_PREFIXES, convert_to_tensor=True)
     words = query.lower().split()
     for n in range(2, 7):
         if len(words) >= n:
@@ -54,40 +32,25 @@ def remove_photo_prefix(query: str):
     print("❌ No irrelevant prefix detected.")
     return query
 
-import re
-
-import re
-
 def remove_dumb_connectors(query: str) -> str:
-    DUMB_CONNECTORS = {"a", "an", "the", "some", "any", "this", "that", "these", "those", 
-                       "my", "your", "his", "her", "its", "our", "their", "one", "two", 
-                       "few", "several", "many", "much", "each", "every", "either", "neither", 
-                       "another", "such"}
-    # Separamos la query en segmentos bloqueados y no bloqueados
     parts = re.split(r'(\[.*?\])', query)
     processed_parts = []
     for part in parts:
         if part.startswith("[") and part.endswith("]"):
-            # Dejar intacto el segmento bloqueado
             processed_parts.append(part)
         else:
-            # Procesamos la parte libre eliminando los conectores no deseados
             words = part.split()
             filtered = [w for w in words if w.lower() not in DUMB_CONNECTORS]
             processed_parts.append(" ".join(filtered))
-    # Se unen las partes sin alterar los segmentos ya bloqueados
     return "".join(processed_parts)
 
 def split_query_with_connectors(query: str):
-    # Separamos en partes bloqueadas y partes sin bloquear
     parts = re.split(r'(\[.*?\])', query)
     segments = []
     for part in parts:
         if part.startswith("[") and part.endswith("]"):
-            # Mantenemos el segmento bloqueado sin modificarlo
             segments.append(part)
         else:
-            # Procesamos la parte libre haciendo split según conectores
             words = part.lower().replace(",", "").split()
             current_segment = []
             for word in words:
@@ -102,10 +65,6 @@ def split_query_with_connectors(query: str):
     print(f"\nSegmentos por conectores: {segments}")
     return segments
 
-
-
-
-# Función de respaldo con Spacy para etiquetar palabras desconocidas
 def get_pos_spacy_no_context(word):
     doc = nlp(word)
     pos = doc[0].pos_
@@ -114,23 +73,17 @@ def get_pos_spacy_no_context(word):
 def get_pos_spacy(word: str, sentence: str = None) -> str:
     if sentence:
         doc = nlp(sentence)
-        # Buscar el token que coincida con la palabra
         for token in doc:
             if token.text.lower() == word.lower():
                 pos = token.pos_
-                final_pos = pos if pos in ["ADJ", "NOUN", "VERB", "ADV", "ADP"] else "UNKNOWN"
-                return final_pos
+                return pos if pos in ["ADJ", "NOUN", "VERB", "ADV", "ADP"] else "UNKNOWN"
     else:
         print("DEBUG: No se proporcionó oración; analizando la palabra de forma aislada.")
-    
-    # Análisis aislado
     doc = nlp(word)
     pos = doc[0].pos_
-    final_pos = pos if pos in ["ADJ", "NOUN", "VERB", "ADV", "ADP"] else "UNKNOWN"
-    return final_pos
+    return pos if pos in ["ADJ", "NOUN", "VERB", "ADV", "ADP"] else "UNKNOWN"
 
-# Funciones para determinar la categoría gramatical de una palabra con WordNet y Spacy como respaldo
-def is_adjective(word, query = None):
+def is_adjective(word, query=None):
     lemma = lemmatizer.lemmatize(word, pos='a')
     return any(ss.pos() == 'a' for ss in wn.synsets(lemma)) or get_pos_spacy(word, query) == "ADJ"
 
@@ -150,64 +103,29 @@ def is_preposition(word, query):
     return word in {"of", "by"}
 
 
-# Lista de estructuras de segmentos a detectar
-patterns = [
-    ("ADJ_NOUN", [is_adjective, is_noun]),  # lazy girl
-    ("NOUN_ADJ", [is_noun, is_adjective]),  # market sunny
-    ("ADJ_NOUN_VERB", [is_adjective, is_noun, is_verb]),  # lazy girl sleeping
-    ("NOUN_PREP_NOUN", [is_noun, is_preposition, is_noun]),  # concept of chaos
-    ("NOUN_VERB", [is_noun, is_verb]),  # girl sleeping
-    ("NOUN_NOUN", [is_noun, is_noun]),  # farm animals
-    ("NOUN_VERB_CD", [is_noun, is_verb, is_noun]),  # girl eating icecream
-    ("NOUN_VERB_ADJ_NOUN", [is_noun, is_verb, is_adjective, is_noun]),  # girl eating nice icecream
-    ("NOUN_VERB_ADJ", [is_noun, is_verb, is_adjective]),  # girl working hard
-    ("VERB_ALONE", [is_verb]),  # sleeping
-    ("VERB_PREP_NOUN", [is_verb, is_preposition, is_noun]),  # surrounded by animals
-    ("NOUN_ALONE", [is_noun]),  # girl
-]
-
 
 def block_predefined(query: str) -> str:
-    predefined_phrases = ["men in suits", "woman in red"]
-    for phrase in predefined_phrases:
-        # Se crea un patrón que ignore mayúsculas/minúsculas
+    for phrase in PREDEFINES_BLOCKED:
         pattern = re.compile(re.escape(phrase), re.IGNORECASE)
-        # Se reemplaza cada ocurrencia por la versión entre corchetes
         query = pattern.sub(lambda m: f"[{m.group(0)}]", query)
     return query
 
-def block_er_entities(query: str, use_model: bool = False) -> str:
-    """
-    Procesa la query para identificar entidades nombradas y las bloquea envolviéndolas en corchetes,
-    de modo que no se procesen en etapas posteriores.
-    
-    Parámetros:
-      - query: cadena de texto original.
-      - use_model: si es True se usará el modelo de HuggingFace (ner_model, previamente instanciado) para detectar entidades;
-                   si es False se aplicará una heurística que detecta secuencias de dos o más palabras que inician en mayúscula.
-    
-    Retorna:
-      La query con las entidades detectadas bloqueadas entre corchetes.
-    """
+def block_er_entities(query: str, use_model: bool = True) -> str:
     if use_model:
-        # Se asume que ner_model está definido globalmente
         entities = ner_model(query)
-        # Ordenar las entidades de forma descendente según su posición para evitar problemas al reemplazar
         for ent in sorted(entities, key=lambda x: x['start'], reverse=True):
             start, end = ent['start'], ent['end']
             query = query[:start] + f"[{query[start:end]}]" + query[end:]
         return query
     else:
-        # Heurística: buscamos secuencias de dos o más palabras que comienzan con mayúscula.
         pattern = r'\b(?:[A-Z][a-z]*(?:\s+[A-Z][a-z]*)+)\b'
         return re.sub(pattern, lambda m: f"[{m.group(0)}]", query)
-    
+
 def replace_quotes_by_brackets(text: str) -> str:
     replacer = cycle(["[", "]"])
     return re.sub(r"[\"']", lambda m: next(replacer), text)
 
 def preprocess_query(query: str):
-    
     no_prefix_query = remove_photo_prefix(query)
     print(f" No-prefix query: {no_prefix_query}")
 
@@ -228,49 +146,8 @@ def preprocess_query(query: str):
 
     return splitted_query, no_prefix_query
 
-def segment_query_v2(query: str) -> str:
-    preprocessed_segments, no_prefix_query = preprocess_query(query)
-    all_segments = set()
-    processed_segments = set()  # Almacena frases completas en lugar de palabras individuales
-
-    for segment in preprocessed_segments:
-        blocked_entities = re.findall(r'\[(.*?)\]', segment)
-        for entity in blocked_entities:
-            entity_clean = entity.strip()
-            if entity_clean:
-                print(f"    ✅ Bloqueo detectado: {entity_clean}")
-                all_segments.add(entity_clean)
-                processed_segments.add(entity_clean)  # Añadir segmento completo a procesados
-        
-        segment_without_blocks = re.sub(r'\[.*?\]', '', segment)
-        words = segment_without_blocks.split()
-        
-        print(f"\nProcesando segmento: {segment_without_blocks}")
-        
-        i = 0
-        while i < len(words):
-            for name, pattern in patterns:
-                if i + len(pattern) <= len(words):
-                    word_segment = " ".join(words[i:i+len(pattern)])
-
-                    # Saltar si ya detectamos un segmento que contiene este
-                    if any(word_segment in larger_segment for larger_segment in processed_segments):
-                        continue
-                    
-                    if all(pattern[j](words[i+j], 'photos of ' + no_prefix_query) for j in range(len(pattern))):
-                        # print(f"    ✅ Match: {word_segment} ({name})")
-                        all_segments.add(word_segment)
-                        processed_segments.add(word_segment)  # Añadir segmento completo
-            
-            i += 1
-
-    return " | ".join(all_segments)
-
-
 def remove_contained_segments_simple(segments_str: str) -> list[str]:
-    # Separamos la cadena por "|" y limpiamos espacios
     segments = [s.strip() for s in segments_str.split("|") if s.strip()]
-    # Eliminamos duplicados manteniendo el orden
     segments = list(dict.fromkeys(segments))
     
     final_segments = []
@@ -279,14 +156,11 @@ def remove_contained_segments_simple(segments_str: str) -> list[str]:
             final_segments.append(seg)
     return final_segments
 
-def minimal_segment_cover(segments_str: str) -> list[str]:
-    # Separamos la cadena y eliminamos duplicados
+def minimal_segment_cover(segments_str: str, original: str) -> list[str]:
     segments = [s.strip() for s in segments_str.split("|") if s.strip()]
     segments = list(dict.fromkeys(segments))
     
-    # Asociamos cada segmento a su conjunto de palabras (en minúsculas)
     seg_to_words = {seg: set(seg.split()) for seg in segments}
-    # Universo: todas las palabras presentes en algún segmento
     universe = set().union(*seg_to_words.values())
     
     best_cover = None
@@ -294,7 +168,6 @@ def minimal_segment_cover(segments_str: str) -> list[str]:
     best_cover_total_words = float('inf')
     n = len(segments)
     
-    # Recorremos todos los subconjuntos de segmentos (brute force, n pequeño)
     for i in range(1, 1 << n):
         subset = [segments[j] for j in range(n) if (i >> j) & 1]
         covered = set()
@@ -303,7 +176,6 @@ def minimal_segment_cover(segments_str: str) -> list[str]:
         if covered == universe:
             subset_size = len(subset)
             total_words = sum(len(seg.split()) for seg in subset)
-            # Prioriza el menor número de segmentos, y en empate, el de menos palabras
             if subset_size < best_cover_size or (subset_size == best_cover_size and total_words < best_cover_total_words):
                 best_cover = subset
                 best_cover_size = subset_size
@@ -311,16 +183,188 @@ def minimal_segment_cover(segments_str: str) -> list[str]:
 
     if best_cover is None:
         return segments
-    # Ordenamos según el orden de aparición original
-    best_cover.sort(key=lambda s: segments.index(s))
+    # Ordenar según el orden en que aparecen en la query original
+    best_cover.sort(key=lambda s: original.find(s))
     return best_cover
 
+# Lista de conectores para dividir la query
+CONNECTORS = {"in", "at", "with", "near", "on", "under", "over", "between", "and"}
 
-@app.post("/segment-query")
-def segment_query(request: QueryRequest):
-    result = segment_query_v2(request.query)
-    filtered_result = minimal_segment_cover(result)
-    return {"segments": result, "filtered_segments": filtered_result}
+# Lista de estructuras de segmentos a detectar
+PATTERNS = [
+    ("ADJ_NOUN", [is_adjective, is_noun]),  # lazy girl
+    ("NOUN_ADJ", [is_noun, is_adjective]),  # market sunny
+    ("ADJ_NOUN_VERB", [is_adjective, is_noun, is_verb]),  # lazy girl sleeping
+    ("NOUN_PREP_NOUN", [is_noun, is_preposition, is_noun]),  # concept of chaos
+    ("NOUN_VERB", [is_noun, is_verb]),  # girl sleeping
+    ("NOUN_NOUN", [is_noun, is_noun]),  # farm animals
+    ("NOUN_VERB_CD", [is_noun, is_verb, is_noun]),  # girl eating icecream
+    ("NOUN_VERB_ADJ_NOUN", [is_noun, is_verb, is_adjective, is_noun]),  # girl eating nice icecream
+    ("NOUN_VERB_ADJ", [is_noun, is_verb, is_adjective]),  # girl working hard
+    ("VERB_ALONE", [is_verb]),  # sleeping
+    ("VERB_PREP_NOUN", [is_verb, is_preposition, is_noun]),  # surrounded by animals
+    ("NOUN_ALONE", [is_noun]),  # girl
+]
 
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=5000, reload=True)
+# Usar patrón tipo {persona} with {traje|objeto}, de forma que solo definamos las personas y los objetos
+# Diferenciar estos bloques de las Named Entities para cuando se haga la expansión semántica
+PREDEFINES_BLOCKED = [
+    "men in suits",
+    "man in suits",
+    "woman in red",
+    "man in black",
+    "woman in white",
+    "boy in jeans",
+    "girl in dress",
+    "man in tie",
+    "woman in scarf",
+    "child in costume",
+    "man in uniform",
+    "woman in boots",
+    "man with beard",
+    "woman with sunglasses",
+    "man in leather jacket",
+    "woman in blue",
+    "man in cap",
+    "woman in skirt",
+    "man with glasses",
+    "woman with braid",
+    "man in raincoat",
+    "woman in trench coat",
+    "man in overcoat",
+    "woman in cardigan",
+    "man in sneakers",
+    "woman in heels",
+    "man in casual wear",
+    "woman in summer dress",
+    "man in denim jacket",
+    "woman in vintage dress",
+    "man in bomber jacket",
+    "woman in elegant gown",
+    "man in army uniform",
+    "woman in business suit",
+    "man in suit and tie",
+    "woman in floral dress",
+    "man with mustache",
+    "woman in red lipstick",
+    "man in formal attire",
+    "woman in cocktail dress",
+    "man in sportswear",
+    "woman in workout gear",
+    "man in overalls",
+    "woman in jumpsuit",
+    "man in a hat",
+    "woman in a dress",
+    "man in cargo pants",
+    "woman in high heels",
+    "man in a vest",
+    "woman in a blazer",
+    "man in streetwear",
+    "woman in casual wear",
+    "man in traditional attire",
+    "old man with cane",
+    "woman with red hat",
+    "man with sunglasses",
+    "girl with ponytail",
+    "boy with backpack",
+    "man with beard",
+    "woman with glasses",
+    "child with balloon",
+    "man with hat",
+    "woman with handbag",
+    "man with mustache",
+    "woman with earrings",
+    "man with scars",
+    "woman with tattoo",
+    "man with guitar",
+    "woman with violin",
+    "man with camera",
+    "woman with smartphone",
+    "child with teddy bear",
+    "man with walking stick",
+    "woman with umbrella",
+    "man with pipe",
+    "woman with book",
+    "man with sword",
+    "woman with bracelet",
+    "child with toy",
+    "old woman with shawl",
+    "young man with cap",
+    "girl with freckles",
+    "boy with glasses",
+    "man with tattoo",
+    "woman with bun",
+    "man with hair gel",
+    "child with red balloon",
+    "man with backpack",
+    "woman with purse",
+    "man with frown",
+    "woman with smile",
+    "man with cigarette",
+    "woman with perfume",
+    "child with crayons",
+    "man with tie",
+    "woman with scarf",
+    "old man with hat",
+    "old woman with cane",
+    "man with walking cane",
+    "woman with headphones",
+    "man with laptop",
+    "woman with camera bag",
+    "man with briefcase"
+]
+
+
+QUERY_PREFIXES = [
+        "photos ", "photos of", "images of", "photos in", "pictures of", "I want to see images of", "show me pictures with", 
+        "I'm looking for an image of", "I need a photo where", "an image with", "a photo that shows", 
+        "I would like to explore pictures of", "photos resembling", "photos similar to", "photos inspired by", 
+        "photos evoking", "photos reminiscent of", "photos capturing the essence of", "photos reflecting", 
+        "photos resonating with", "images resembling", "images similar to", "images inspired by", 
+        "images evoking", "images reminiscent of", "pictures resembling", "pictures similar to", "photos featuring", "images featuring",
+        "pictures inspired by", "pictures reflecting", "pictures resonating with", "images for a project", "images for a series"
+]
+
+DUMB_CONNECTORS = {"a", "an", "the", "some", "any", "this", "that", "these", "those", 
+    "my", "your", "his", "her", "its", "our", "their", "one", "two", 
+    "few", "several", "many", "much", "each", "every", "either", "neither", 
+    "another", "such"}
+
+
+def query_segment(query: str) -> str:
+    preprocessed_segments, no_prefix_query = preprocess_query(query)
+    all_segments = set()
+    processed_segments = set()
+    named_entities = list()
+
+    for segment in preprocessed_segments:
+        blocked_entities = re.findall(r'\[(.*?)\]', segment)
+        for entity in blocked_entities:
+            entity_clean = entity.strip()
+            if entity_clean:
+                print(f"    ✅ Bloqueo detectado: {entity_clean}")
+                all_segments.add(entity_clean)
+                processed_segments.add(entity_clean)
+                named_entities.append(entity_clean)
+        
+        segment_without_blocks = re.sub(r'\[.*?\]', '', segment)
+        words = segment_without_blocks.split()
+        
+        print(f"\nProcesando segmento: {segment_without_blocks}")
+        
+        i = 0
+        while i < len(words):
+            for name, pattern in PATTERNS:
+                if i + len(pattern) <= len(words):
+                    word_segment = " ".join(words[i:i+len(pattern)])
+                    if any(word_segment in larger_segment for larger_segment in processed_segments):
+                        continue
+                    
+                    if all(pattern[j](words[i+j], 'photos of ' + no_prefix_query) for j in range(len(pattern))):
+                        all_segments.add(word_segment)
+                        processed_segments.add(word_segment)
+            i += 1
+
+    segments = " | ".join(all_segments)
+    
+    return {"positive_segments": minimal_segment_cover(segments, no_prefix_query), "no_prefix": no_prefix_query, "original": query, "named_entities": named_entities}
