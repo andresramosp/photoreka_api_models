@@ -104,7 +104,7 @@ def is_adverb(word, query):
     return any(ss.pos() == 'r' for ss in wn.synsets(lemma)) or get_pos_spacy(word, query) == "ADV"
 
 def is_preposition(word, query):
-    return word in {"of"}
+    return word in {"of", "by"}
 
 
 # Lista de estructuras de segmentos a detectar
@@ -119,6 +119,7 @@ patterns = [
     ("NOUN_VERB_ADJ_NOUN", [is_noun, is_verb, is_adjective, is_noun]),  # girl eating nice icecream
     ("NOUN_VERB_ADJ", [is_noun, is_verb, is_adjective]),  # girl working hard
     ("VERB_ALONE", [is_verb]),  # sleeping
+    ("VERB_PREP_NOUN", [is_verb, is_preposition, is_noun]),  # surrounded by animals
     ("NOUN_ALONE", [is_noun]),  # girl
 ]
 
@@ -184,24 +185,41 @@ def preprocess_query(query: str):
 def segment_query_v2(query: str) -> str:
     preprocessed_segments, no_prefix_query = preprocess_query(query)
     all_segments = set()
-    
+    processed_segments = set()  # Almacena frases completas en lugar de palabras individuales
+
     for segment in preprocessed_segments:
-        words = segment.split()
+        blocked_entities = re.findall(r'\[(.*?)\]', segment)
+        for entity in blocked_entities:
+            entity_clean = entity.strip()
+            if entity_clean:
+                print(f"    ✅ Bloqueo detectado: {entity_clean}")
+                all_segments.add(entity_clean)
+                processed_segments.add(entity_clean)  # Añadir segmento completo a procesados
         
-        print(f"\nProcesando segmento: {segment}")
+        segment_without_blocks = re.sub(r'\[.*?\]', '', segment)
+        words = segment_without_blocks.split()
+        
+        print(f"\nProcesando segmento: {segment_without_blocks}")
         
         i = 0
         while i < len(words):
             for name, pattern in patterns:
                 if i + len(pattern) <= len(words):
-                    word_segment = words[i:i+len(pattern)]
-                    if all(pattern[j](word_segment[j], 'photos of ' + no_prefix_query) for j in range(len(pattern))):
-                        segment_text = " ".join(word_segment)
-                        print(f"    ✅ Match: {segment_text} ({name})")
-                        all_segments.add(segment_text)
+                    word_segment = " ".join(words[i:i+len(pattern)])
+
+                    # Saltar si ya detectamos un segmento que contiene este
+                    if any(word_segment in larger_segment for larger_segment in processed_segments):
+                        continue
+                    
+                    if all(pattern[j](words[i+j], 'photos of ' + no_prefix_query) for j in range(len(pattern))):
+                        print(f"    ✅ Match: {word_segment} ({name})")
+                        all_segments.add(word_segment)
+                        processed_segments.add(word_segment)  # Añadir segmento completo
+            
             i += 1
-    
+
     return " | ".join(all_segments)
+
 
 def remove_contained_segments_simple(segments_str: str) -> list[str]:
     # Separamos la cadena por "|" y limpiamos espacios
