@@ -1,10 +1,11 @@
 import runpod
-from api import (
+from logic_inference import (
     adjust_tags_proximities_by_context_inference_logic,
     adjust_descs_proximities_by_context_inference_logic,
-    get_embeddings_logic,
-    structure_query_logic
+    get_embeddings_logic
 )
+
+from query_segment import query_segment
 
 # cambio
 async def handler(job):
@@ -26,7 +27,7 @@ async def handler(job):
             result = get_embeddings_logic(data)
         elif operation == "structure_query":
             data = input_data.get("data", {})
-            result = structure_query_logic(data)
+            result = query_segment(data)
         else:
             result = {"error": f"Operation '{operation}' not supported"}
     except Exception as e:
