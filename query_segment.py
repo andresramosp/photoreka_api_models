@@ -7,6 +7,7 @@ import uvicorn
 from transformers import pipeline
 import spacy
 import re
+from itertools import cycle
 from sentence_transformers import SentenceTransformer, util
 
 
@@ -53,13 +54,55 @@ def remove_photo_prefix(query: str):
     print("❌ No irrelevant prefix detected.")
     return query
 
-def remove_dumb_connectors(query: str):
-    DUMB_CONNECTORS = {"a", "an", "the", "some", "any", "this", "that", "these", "those", "my", "your", "his", "her", "its", "our", "their", "one", "two", "few", "several", "many", "much", "each", "every", "either", "neither", "another", "such"}
-    
-    words = query.split()
-    filtered_words = [word for word in words if word.lower() not in DUMB_CONNECTORS]
-    
-    return " ".join(filtered_words)
+import re
+
+import re
+
+def remove_dumb_connectors(query: str) -> str:
+    DUMB_CONNECTORS = {"a", "an", "the", "some", "any", "this", "that", "these", "those", 
+                       "my", "your", "his", "her", "its", "our", "their", "one", "two", 
+                       "few", "several", "many", "much", "each", "every", "either", "neither", 
+                       "another", "such"}
+    # Separamos la query en segmentos bloqueados y no bloqueados
+    parts = re.split(r'(\[.*?\])', query)
+    processed_parts = []
+    for part in parts:
+        if part.startswith("[") and part.endswith("]"):
+            # Dejar intacto el segmento bloqueado
+            processed_parts.append(part)
+        else:
+            # Procesamos la parte libre eliminando los conectores no deseados
+            words = part.split()
+            filtered = [w for w in words if w.lower() not in DUMB_CONNECTORS]
+            processed_parts.append(" ".join(filtered))
+    # Se unen las partes sin alterar los segmentos ya bloqueados
+    return "".join(processed_parts)
+
+def split_query_with_connectors(query: str):
+    # Separamos en partes bloqueadas y partes sin bloquear
+    parts = re.split(r'(\[.*?\])', query)
+    segments = []
+    for part in parts:
+        if part.startswith("[") and part.endswith("]"):
+            # Mantenemos el segmento bloqueado sin modificarlo
+            segments.append(part)
+        else:
+            # Procesamos la parte libre haciendo split según conectores
+            words = part.lower().replace(",", "").split()
+            current_segment = []
+            for word in words:
+                if word in CONNECTORS:
+                    if current_segment:
+                        segments.append(" ".join(current_segment))
+                        current_segment = []
+                else:
+                    current_segment.append(word)
+            if current_segment:
+                segments.append(" ".join(current_segment))
+    print(f"\nSegmentos por conectores: {segments}")
+    return segments
+
+
 
 
 # Función de respaldo con Spacy para etiquetar palabras desconocidas
@@ -123,26 +166,15 @@ patterns = [
     ("NOUN_ALONE", [is_noun]),  # girl
 ]
 
-def split_query_with_connectors(query: str):
-    words = query.lower().replace(",", "").split()
-    segments = []
-    current_segment = []
-    
-    for word in words:
-        if word in CONNECTORS:
-            if current_segment:
-                segments.append(" ".join(current_segment))
-                current_segment = []
-        else:
-            current_segment.append(word)
-    
-    if current_segment:
-        segments.append(" ".join(current_segment))
 
-    print(f"\nSegmentos por conectores: {segments}")
-
-    
-    return segments
+def block_predefined(query: str) -> str:
+    predefined_phrases = ["men in suits", "woman in red"]
+    for phrase in predefined_phrases:
+        # Se crea un patrón que ignore mayúsculas/minúsculas
+        pattern = re.compile(re.escape(phrase), re.IGNORECASE)
+        # Se reemplaza cada ocurrencia por la versión entre corchetes
+        query = pattern.sub(lambda m: f"[{m.group(0)}]", query)
+    return query
 
 def block_er_entities(query: str, use_model: bool = False) -> str:
     """
@@ -169,17 +201,31 @@ def block_er_entities(query: str, use_model: bool = False) -> str:
         # Heurística: buscamos secuencias de dos o más palabras que comienzan con mayúscula.
         pattern = r'\b(?:[A-Z][a-z]*(?:\s+[A-Z][a-z]*)+)\b'
         return re.sub(pattern, lambda m: f"[{m.group(0)}]", query)
+    
+def replace_quotes_by_brackets(text: str) -> str:
+    replacer = cycle(["[", "]"])
+    return re.sub(r"[\"']", lambda m: next(replacer), text)
 
 def preprocess_query(query: str):
+    
     no_prefix_query = remove_photo_prefix(query)
     print(f" No-prefix query: {no_prefix_query}")
 
-    blocked_er_query = block_er_entities(no_prefix_query)
+    query_with_intentional_brackets = replace_quotes_by_brackets(no_prefix_query)
+    print(f" Query with intentional brackets: {query_with_intentional_brackets}")
+
+    blocked_predefined_query = block_predefined(query_with_intentional_brackets)
+    print(f" Blocked predefined query: {blocked_predefined_query}")
+
+    blocked_er_query = block_er_entities(blocked_predefined_query)
+    print(f" Blocked ER query: {blocked_er_query}")
 
     clean_query = remove_dumb_connectors(blocked_er_query)
     print(f" Clean query: {clean_query}")
 
     splitted_query = split_query_with_connectors(clean_query)
+    print(f" Splitted query: {splitted_query}")
+
     return splitted_query, no_prefix_query
 
 def segment_query_v2(query: str) -> str:
@@ -212,7 +258,7 @@ def segment_query_v2(query: str) -> str:
                         continue
                     
                     if all(pattern[j](words[i+j], 'photos of ' + no_prefix_query) for j in range(len(pattern))):
-                        print(f"    ✅ Match: {word_segment} ({name})")
+                        # print(f"    ✅ Match: {word_segment} ({name})")
                         all_segments.add(word_segment)
                         processed_segments.add(word_segment)  # Añadir segmento completo
             

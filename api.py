@@ -328,20 +328,6 @@ def get_embeddings_logic(data: dict):
     embeddings = embeddings_model.encode(tags, convert_to_tensor=False)
     return {"tags": tags, "embeddings": [emb.tolist() for emb in embeddings]}
 
-def structure_query_logic(data: dict):
-    query = data.get("query", "").strip()
-    if not query:
-        raise ValueError("Missing 'query' field")
-    print(f"📥 Received query: {query}")
-    structured_query_str, types, positive_segments, negative_segments, query_no_prefix = segment_query(query)
-    print(f"📤 Generated response: {structured_query_str}")
-    return {
-        "clear": structured_query_str,
-        "no_prefix": query_no_prefix,
-        "types": types,
-        "positive_segments": positive_segments,
-        "negative_segments": negative_segments
-    }
 
 # --- Endpoints de FastAPI ---
 
@@ -361,12 +347,6 @@ async def adjust_descs_proximities_by_context_inference(request: Request):
 async def get_embeddings(request: Request):
     data = await request.json()
     results = get_embeddings_logic(data)
-    return JSONResponse(content=results)
-
-@app.post("/structure_query")
-async def structure_query(request: Request):
-    data = await request.json()
-    results = structure_query_logic(data)
     return JSONResponse(content=results)
 
 # Inicializar recursos
