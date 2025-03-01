@@ -21,16 +21,24 @@ def remove_photo_prefix(query: str):
 
     PREFIX_EMBEDDINGS = embeddings_model.encode(QUERY_PREFIXES, convert_to_tensor=True)
     words = query.lower().split()
-    for n in range(2, 7):
+    matched_prefix = None
+
+    for n in range(2, 7):  # Buscar en distintos tamaños
         if len(words) >= n:
             segment = " ".join(words[:n])
             segment_embedding = embeddings_model.encode(segment, convert_to_tensor=True)
             similarities = util.pytorch_cos_sim(segment_embedding, PREFIX_EMBEDDINGS)[0]
-            if any(similarity.item() > 0.8 for similarity in similarities):
-                print(f"✅ Prefix detected and removed: {segment}")
-                return " ".join(query.split()[n:]).strip()
+
+            if any(similarity.item() > 0.78 for similarity in similarities):
+                matched_prefix = segment  # Guardar el prefijo más largo posible
+
+    if matched_prefix:
+        print(f"✅ Prefix detected and removed: {matched_prefix}")
+        return query[len(matched_prefix):].strip()  # Eliminar prefijo más largo detectado
+
     print("❌ No irrelevant prefix detected.")
     return query
+
 
 def remove_dumb_connectors(query: str) -> str:
     parts = re.split(r'(\[.*?\])', query)
@@ -316,14 +324,20 @@ PREDEFINES_BLOCKED = [
 
 
 QUERY_PREFIXES = [
-        "photos ", "photos of", "images of", "photos in", "pictures of", "I want to see images of", "show me pictures with", 
-        "I'm looking for an image of", "I need a photo where", "an image with", "a photo that shows", 
-        "I would like to explore pictures of", "photos resembling", "photos similar to", "photos inspired by", 
-        "photos evoking", "photos reminiscent of", "photos capturing the essence of", "photos reflecting", 
-        "photos resonating with", "images resembling", "images similar to", "images inspired by", 
-        "images evoking", "images reminiscent of", "pictures resembling", "pictures similar to", "photos featuring", "images featuring",
-        "pictures inspired by", "pictures reflecting", "pictures resonating with", "images for a project", "images for a series"
+    "I would like to explore pictures of", "I'm looking for an image of", "I want to see images of",
+    "I need a photo where", "show me pictures with", "photos capturing the essence of",
+    "photos resonating with", "photos reminiscent of", "photos reflecting", "photos inspired by",
+    "images for a series related to", "images for a series about", "images for a series",
+    "pictures resonating with", "pictures inspired by", "pictures reflecting", "photos evoking",
+    "images reminiscent of", "images resembling", "images inspired by", "photos featuring",
+    "images featuring", "pictures similar to", "pictures resembling", "images evoking",
+    "images similar to", "photos similar to", "photos resembling", "photos in", "images of",
+    "pictures of", "photos of", "an image with", "a photo that shows", "photos for an article",
+    "photos for a blog post", "photos for a mood board", "pictures for a creative project",
+    "images for social media", "stock photos of", "professional photos of", "aesthetic pictures of"
 ]
+
+QUERY_PREFIXES = sorted(QUERY_PREFIXES, key=len, reverse=True)
 
 DUMB_CONNECTORS = {"a", "an", "the", "some", "any", "this", "that", "these", "those", 
     "my", "your", "his", "her", "its", "our", "their", "one", "two", 

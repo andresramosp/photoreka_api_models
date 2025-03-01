@@ -46,7 +46,7 @@ from logic_inference import (
 )
 
 # Importar funciones de segmentación de query desde query_segment.py
-from query_segment import query_segment
+from query_segment import query_segment, remove_photo_prefix
 
 app = FastAPI()
 
@@ -72,6 +72,12 @@ async def get_embeddings_endpoint(request: Request):
 async def query_segment_endpoint(request: Request):
     data = await request.json()
     result = query_segment(data["query"])
+    return JSONResponse(content=result)
+
+@app.post("/query_no_prefix")
+async def query_segment_endpoint(request: Request):
+    data = await request.json()
+    result = remove_photo_prefix(data["query"])
     return JSONResponse(content=result)
 
 if __name__ == "__main__":
