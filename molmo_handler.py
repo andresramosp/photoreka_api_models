@@ -111,13 +111,14 @@ class EndpointHandler:
 
         generation_config = inputs_data.get("generation_config", {})
         gen_config = GenerationConfig(
-            max_new_tokens=generation_config.get("max_new_tokens", 500),
-            min_new_tokens=generation_config.get("min_new_tokens", 200),
-            temperature=generation_config.get("temperature", 0.5),
-            do_sample=True,
-            stop_sequences=["<|endoftext|>"],
             eos_token_id=self.processor.tokenizer.eos_token_id,
             pad_token_id=self.processor.tokenizer.pad_token_id,
+            max_new_tokens=generation_config.get("max_new_tokens", 200),
+            temperature=generation_config.get("temperature", 0.2),
+            top_p=generation_config.get("top_p", 1),
+            top_k=generation_config.get("top_k", 50),
+            length_penalty=generation_config.get("length_penalty", 1),
+            stop_strings="<|endoftext|>",
         )
 
         # Diccionario para almacenar los resultados parciales por imagen
