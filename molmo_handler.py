@@ -162,11 +162,10 @@ class EndpointHandler:
             prompt_end_time = time.time()
             print(f"[LOG] Procesamiento del prompt '{prompt}' completado en {prompt_end_time - prompt_start_time:.2f} segundos.")
 
-        # Se combinan las inferencias de cada prompt para cada imagen
+        # Se combinan las inferencias de cada prompt para cada imagen, ahora en un array
         combined_results = []
         for img_id, descriptions in final_results.items():
-            combined_text = " | ".join(descriptions)
-            combined_results.append({"id": img_id, "description": combined_text})
+            combined_results.append({"id": img_id, "descriptions": descriptions})
         
         global_end_time = time.time()
         print(f"[LOG] Tiempo total de procesamiento: {global_end_time - global_start_time:.2f} segundos.")
