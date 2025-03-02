@@ -7,19 +7,21 @@ import io, base64, json, traceback, time
 from transformers import AutoModelForCausalLM, AutoProcessor, GenerationConfig
 
 class EndpointHandler:
-    def __init__(self, model_dir):
+    def __init__(self, model_dir, default_float16=True):
         print("[INFO] Cargando modelo con trust_remote_code=True...")
+        # Se determina el dtype para la carga del modelo según el parámetro (default_float16 se puede ajustar al instanciar)
+        dtype = torch.bfloat16 if default_float16 else "auto"
         self.processor = AutoProcessor.from_pretrained(
             model_dir, trust_remote_code=True, torch_dtype="auto", device_map="auto"
         )
         self.model = AutoModelForCausalLM.from_pretrained(
             model_dir,
             trust_remote_code=True,
-            torch_dtype=torch.bfloat16,
+            torch_dtype=dtype,
             device_map="auto"
         )
 
-    def process_batch(self, prompt, images_list):
+    def process_batch(self, prompt, images_list, images_config=None):
         batch_texts = [f"User: {prompt} Assistant:" for _ in images_list]
         tokens_list = [
             self.processor.tokenizer.encode(" " + text, add_special_tokens=False)
@@ -27,8 +29,8 @@ class EndpointHandler:
         ]
         outputs_list = []
         images_kwargs = {
-            "max_crops": 12,
-            "overlap_margins": [4, 4],
+            "max_crops": images_config.get("max_crops", 12) if images_config else 12,
+            "overlap_margins": images_config.get("overlap_margins", [4, 4]) if images_config else [4, 4],
             "base_image_input_size": [336, 336],
             "image_token_length_w": 12,
             "image_token_length_h": 12,
@@ -110,6 +112,8 @@ class EndpointHandler:
             return {"error": "No se pudo cargar ninguna imagen."}
 
         generation_config = inputs_data.get("generation_config", {})
+        # Se extrae el parámetro "float16" (por defecto True)
+        use_bfloat16 = generation_config.get("float16", True)
         gen_config = GenerationConfig(
             eos_token_id=self.processor.tokenizer.eos_token_id,
             pad_token_id=self.processor.tokenizer.pad_token_id,
@@ -119,6 +123,7 @@ class EndpointHandler:
             top_k=generation_config.get("top_k", 50),
             length_penalty=generation_config.get("length_penalty", 1),
             stop_strings="<|endoftext|>",
+            do_sample=True
         )
 
         # Diccionario para almacenar los resultados parciales por imagen
@@ -134,9 +139,11 @@ class EndpointHandler:
                 batch_images = images_list[start:start + batch_size]
                 batch_ids = ids[start:start + batch_size]
                 print(f"[LOG] Procesando lote para prompt '{prompt}' de imágenes {start} a {start + len(batch_images)-1}")
-                inputs_batch = self.process_batch(prompt, batch_images)
+                inputs_batch = self.process_batch(prompt, batch_images, generation_config)
                 inputs_batch = {k: v.to(self.model.device) for k, v in inputs_batch.items()}
-                inputs_batch["images"] = inputs_batch["images"].to(torch.bfloat16)
+                # Solo se convierte a bfloat16 si se indicó "float16": true
+                if use_bfloat16:
+                    inputs_batch["images"] = inputs_batch["images"].to(torch.bfloat16)
                 
                 with torch.inference_mode():
                     outputs = self.model.generate_from_batch(
