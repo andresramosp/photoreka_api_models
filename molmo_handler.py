@@ -68,107 +68,104 @@ class EndpointHandler:
             )
         return batch_outputs
 
-    def __call__(self, data=None):
-        global_start_time = time.time()
-        print("[INFO] Iniciando procesamiento por lotes...")
-        if not data:
-            return {"error": "El cuerpo de la petición está vacío."}
-        if "inputs" not in data:
-            return {"error": "Se requiere un campo 'inputs' en la petición JSON."}
+def __call__(self, data=None):
+    global_start_time = time.time()
+    print("[INFO] Iniciando procesamiento por lotes...")
+    if not data:
+        return {"error": "El cuerpo de la petición está vacío."}
+    if "inputs" not in data:
+        return {"error": "Se requiere un campo 'inputs' en la petición JSON."}
 
-        inputs_data = data["inputs"]
-
-        prompts = inputs_data.get("prompts", [])
-        if not prompts or not isinstance(prompts, list):
-            return {"error": "Se requiere un array de 'prompts' en la petición JSON."}
-
-        batch_size = inputs_data.get("batch_size", len(inputs_data.get("images", [])))
-        print(f"[DEBUG] Número de prompts: {len(prompts)} | Tamaño de lote: {batch_size}")
-
-        images_list = []
-        ids = []
-        if "images" in inputs_data and isinstance(inputs_data["images"], list):
-            for item in inputs_data["images"]:
-                try:
-                    image_id = item.get("id", "desconocido")
-                    b64 = item.get("base64", "")
-                    if not b64:
-                        continue
-                    if b64.startswith("data:image") and "," in b64:
-                        _, b64 = b64.split(",", 1)
-                    decoded = base64.b64decode(b64)
-                    image = Image.open(io.BytesIO(decoded)).convert("RGB")
-                    images_list.append(image)
-                    ids.append(image_id)
-                except Exception:
-                    traceback.print_exc()
+    inputs_data = data["inputs"]
+    # Cargar imágenes y sus IDs
+    images_list = []
+    ids = []
+    if "images" in inputs_data and isinstance(inputs_data["images"], list):
+        for item in inputs_data["images"]:
+            try:
+                image_id = item.get("id", "desconocido")
+                b64 = item.get("base64", "")
+                if not b64:
                     continue
+                if b64.startswith("data:image") and "," in b64:
+                    _, b64 = b64.split(",", 1)
+                decoded = base64.b64decode(b64)
+                image = Image.open(io.BytesIO(decoded)).convert("RGB")
+                images_list.append(image)
+                ids.append(image_id)
+            except Exception:
+                traceback.print_exc()
+                continue
+    else:
+        return {"error": "Se requiere una lista de imágenes en 'inputs.images'."}
+
+    # Obtener prompts globales y específicos
+    global_prompts = inputs_data.get("prompts", [])
+    prompts_per_image = inputs_data.get("prompts_per_image", [])
+    specific_prompts = {str(item["id"]): item["prompt"] for item in prompts_per_image if "id" in item and "prompt" in item}
+
+    # Crear un diccionario que agrupe las imágenes según el prompt a utilizar
+    prompt_groups = {}
+    for idx, img_id in enumerate(ids):
+        # Si existe un prompt específico, se usa ese; si no, se asigna cada prompt global
+        if str(img_id) in specific_prompts:
+            prompt_text = specific_prompts[str(img_id)]
+            prompt_groups.setdefault(prompt_text, {"indices": [], "ids": []})
+            prompt_groups[prompt_text]["indices"].append(idx)
+            prompt_groups[prompt_text]["ids"].append(img_id)
         else:
-            return {"error": "Se requiere una lista de imágenes en 'inputs.images'."}
+            for prompt_text in global_prompts:
+                prompt_groups.setdefault(prompt_text, {"indices": [], "ids": []})
+                prompt_groups[prompt_text]["indices"].append(idx)
+                prompt_groups[prompt_text]["ids"].append(img_id)
 
-        if len(images_list) == 0:
-            return {"error": "No se pudo cargar ninguna imagen."}
+    final_results = {img_id: [] for img_id in ids}
+    batch_size = inputs_data.get("batch_size", len(images_list))
+    generation_config = inputs_data.get("generation_config", {})
+    use_bfloat16 = generation_config.get("float16", True)
+    gen_config = GenerationConfig(
+        eos_token_id=self.processor.tokenizer.eos_token_id,
+        pad_token_id=self.processor.tokenizer.pad_token_id,
+        max_new_tokens=generation_config.get("max_new_tokens", 200),
+        temperature=generation_config.get("temperature", 0.2),
+        top_p=generation_config.get("top_p", 1),
+        top_k=generation_config.get("top_k", 50),
+        length_penalty=generation_config.get("length_penalty", 1),
+        stop_strings="<|endoftext|>",
+        do_sample=True
+    )
 
-        generation_config = inputs_data.get("generation_config", {})
-        # Log completo de generation_config
-        print(f"[DEBUG] Parámetros de generation_config: {generation_config}")
-        use_bfloat16 = generation_config.get("float16", True)
-        gen_config = GenerationConfig(
-            eos_token_id=self.processor.tokenizer.eos_token_id,
-            pad_token_id=self.processor.tokenizer.pad_token_id,
-            max_new_tokens=generation_config.get("max_new_tokens", 200),
-            temperature=generation_config.get("temperature", 0.2),
-            top_p=generation_config.get("top_p", 1),
-            top_k=generation_config.get("top_k", 50),
-            length_penalty=generation_config.get("length_penalty", 1),
-            stop_strings="<|endoftext|>",
-            do_sample=True
-        )
-        print(f"[DEBUG] Parámetros de generación utilizados: max_new_tokens={gen_config.max_new_tokens}, temperature={gen_config.temperature}, top_p={gen_config.top_p}, top_k={gen_config.top_k}, length_penalty={gen_config.length_penalty}, float16={use_bfloat16}")
-
-        final_results = {img_id: [] for img_id in ids}
-
-        for prompt in prompts:
-            print("[DEBUG] Procesando un prompt (contenido omitido).")
-            prompt_start_time = time.time()
-            for start in range(0, len(images_list), batch_size):
-                batch_start_time = time.time()
-                batch_images = images_list[start:start + batch_size]
-                batch_ids = ids[start:start + batch_size]
-                print(f"[DEBUG] Procesando lote de imágenes de índices {start} a {start + len(batch_images)-1}. Tamaño del lote: {len(batch_images)}")
-                inputs_batch = self.process_batch(prompt, batch_images, generation_config)
-                print(f"[DEBUG] Dimensiones de inputs_batch: " + ", ".join([f"{k}: {v.shape}" for k, v in inputs_batch.items()]))
-                inputs_batch = {k: v.to(self.model.device) for k, v in inputs_batch.items()}
-                if use_bfloat16 and "images" in inputs_batch:
-                    inputs_batch["images"] = inputs_batch["images"].to(torch.bfloat16)
-                print(f"[DEBUG] Ejecutando inferencia en dispositivo: {self.model.device}")
-                with torch.inference_mode():
-                    outputs = self.model.generate_from_batch(
-                        inputs_batch,
-                        gen_config,
-                        tokenizer=self.processor.tokenizer,
-                    )
-                input_len = inputs_batch["input_ids"].shape[1]
-                generated_texts = self.processor.tokenizer.batch_decode(
-                    outputs[:, input_len:], skip_special_tokens=True
+    # Procesar cada grupo de prompt por batches
+    for prompt_text, group in prompt_groups.items():
+        print(f"[DEBUG] Procesando grupo con prompt: {prompt_text}")
+        group_images = [images_list[i] for i in group["indices"]]
+        group_ids = group["ids"]
+        for start in range(0, len(group_images), batch_size):
+            batch_images = group_images[start:start+batch_size]
+            batch_ids = group_ids[start:start+batch_size]
+            inputs_batch = self.process_batch(prompt_text, batch_images, generation_config)
+            inputs_batch = {k: v.to(self.model.device) for k, v in inputs_batch.items()}
+            if use_bfloat16 and "images" in inputs_batch:
+                inputs_batch["images"] = inputs_batch["images"].to(torch.bfloat16)
+            with torch.inference_mode():
+                outputs = self.model.generate_from_batch(
+                    inputs_batch,
+                    gen_config,
+                    tokenizer=self.processor.tokenizer,
                 )
-                for idx, text in enumerate(generated_texts):
-                    try:
-                        parsed = json.loads(text)
-                        description = parsed.get("description", text)
-                    except Exception:
-                        description = text
-                    final_results[batch_ids[idx]].append(description)
-                    torch.cuda.empty_cache()
-                batch_end_time = time.time()
-                print(f"[DEBUG] Lote completado en {batch_end_time - batch_start_time:.2f} segundos.")
-            prompt_end_time = time.time()
-            print(f"[DEBUG] Procesamiento de prompt completado en {prompt_end_time - prompt_start_time:.2f} segundos.")
+            input_len = inputs_batch["input_ids"].shape[1]
+            generated_texts = self.processor.tokenizer.batch_decode(
+                outputs[:, input_len:], skip_special_tokens=True
+            )
+            for idx, text in enumerate(generated_texts):
+                try:
+                    parsed = json.loads(text)
+                    description = parsed.get("description", text)
+                except Exception:
+                    description = text
+                final_results[batch_ids[idx]].append(description)
+            torch.cuda.empty_cache()
 
-        combined_results = []
-        for img_id, descriptions in final_results.items():
-            combined_results.append({"id": img_id, "descriptions": descriptions})
-        
-        global_end_time = time.time()
-        print(f"[DEBUG] Tiempo total de procesamiento: {global_end_time - global_start_time:.2f} segundos.")
-        return combined_results
+    combined_results = [{"id": img_id, "descriptions": descs} for img_id, descs in final_results.items()]
+    print(f"[DEBUG] Tiempo total de procesamiento: {time.time() - global_start_time:.2f} segundos.")
+    return combined_results
