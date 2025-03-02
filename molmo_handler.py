@@ -9,7 +9,6 @@ from transformers import AutoModelForCausalLM, AutoProcessor, GenerationConfig
 class EndpointHandler:
     def __init__(self, model_dir, default_float16=True):
         print("[INFO] Cargando modelo con trust_remote_code=True...")
-        # Se determina el dtype para la carga del modelo según el parámetro (default_float16 se puede ajustar al instanciar)
         dtype = torch.bfloat16 if default_float16 else "auto"
         self.processor = AutoProcessor.from_pretrained(
             model_dir, trust_remote_code=True, torch_dtype="auto", device_map="auto"
@@ -79,13 +78,12 @@ class EndpointHandler:
 
         inputs_data = data["inputs"]
 
-        # Se espera un array de prompts
         prompts = inputs_data.get("prompts", [])
         if not prompts or not isinstance(prompts, list):
             return {"error": "Se requiere un array de 'prompts' en la petición JSON."}
 
         batch_size = inputs_data.get("batch_size", len(inputs_data.get("images", [])))
-        print(f"[DEBUG] Prompts: {prompts} | batch_size: {batch_size}")
+        print(f"[DEBUG] Número de prompts: {len(prompts)} | Tamaño de lote: {batch_size}")
 
         images_list = []
         ids = []
@@ -112,7 +110,8 @@ class EndpointHandler:
             return {"error": "No se pudo cargar ninguna imagen."}
 
         generation_config = inputs_data.get("generation_config", {})
-        # Se extrae el parámetro "float16" (por defecto True)
+        # Log completo de generation_config
+        print(f"[DEBUG] Parámetros de generation_config: {generation_config}")
         use_bfloat16 = generation_config.get("float16", True)
         gen_config = GenerationConfig(
             eos_token_id=self.processor.tokenizer.eos_token_id,
@@ -125,33 +124,30 @@ class EndpointHandler:
             stop_strings="<|endoftext|>",
             do_sample=True
         )
+        print(f"[DEBUG] Parámetros de generación utilizados: max_new_tokens={gen_config.max_new_tokens}, temperature={gen_config.temperature}, top_p={gen_config.top_p}, top_k={gen_config.top_k}, length_penalty={gen_config.length_penalty}, float16={use_bfloat16}")
 
-        # Diccionario para almacenar los resultados parciales por imagen
         final_results = {img_id: [] for img_id in ids}
 
-        # Procesamiento para cada prompt
         for prompt in prompts:
-            print(f"[LOG] Inicio del procesamiento para prompt: '{prompt}'")
+            print("[DEBUG] Procesando un prompt (contenido omitido).")
             prompt_start_time = time.time()
-            # Procesamos imágenes en lotes
             for start in range(0, len(images_list), batch_size):
                 batch_start_time = time.time()
                 batch_images = images_list[start:start + batch_size]
                 batch_ids = ids[start:start + batch_size]
-                print(f"[LOG] Procesando lote para prompt '{prompt}' de imágenes {start} a {start + len(batch_images)-1}")
+                print(f"[DEBUG] Procesando lote de imágenes de índices {start} a {start + len(batch_images)-1}. Tamaño del lote: {len(batch_images)}")
                 inputs_batch = self.process_batch(prompt, batch_images, generation_config)
+                print(f"[DEBUG] Dimensiones de inputs_batch: " + ", ".join([f"{k}: {v.shape}" for k, v in inputs_batch.items()]))
                 inputs_batch = {k: v.to(self.model.device) for k, v in inputs_batch.items()}
-                # Solo se convierte a bfloat16 si se indicó "float16": true
-                if use_bfloat16:
+                if use_bfloat16 and "images" in inputs_batch:
                     inputs_batch["images"] = inputs_batch["images"].to(torch.bfloat16)
-                
+                print(f"[DEBUG] Ejecutando inferencia en dispositivo: {self.model.device}")
                 with torch.inference_mode():
                     outputs = self.model.generate_from_batch(
                         inputs_batch,
                         gen_config,
                         tokenizer=self.processor.tokenizer,
                     )
-
                 input_len = inputs_batch["input_ids"].shape[1]
                 generated_texts = self.processor.tokenizer.batch_decode(
                     outputs[:, input_len:], skip_special_tokens=True
@@ -165,15 +161,14 @@ class EndpointHandler:
                     final_results[batch_ids[idx]].append(description)
                     torch.cuda.empty_cache()
                 batch_end_time = time.time()
-                print(f"[LOG] Lote completado en {batch_end_time - batch_start_time:.2f} segundos.")
+                print(f"[DEBUG] Lote completado en {batch_end_time - batch_start_time:.2f} segundos.")
             prompt_end_time = time.time()
-            print(f"[LOG] Procesamiento del prompt '{prompt}' completado en {prompt_end_time - prompt_start_time:.2f} segundos.")
+            print(f"[DEBUG] Procesamiento de prompt completado en {prompt_end_time - prompt_start_time:.2f} segundos.")
 
-        # Se combinan las inferencias de cada prompt para cada imagen, ahora en un array
         combined_results = []
         for img_id, descriptions in final_results.items():
             combined_results.append({"id": img_id, "descriptions": descriptions})
         
         global_end_time = time.time()
-        print(f"[LOG] Tiempo total de procesamiento: {global_end_time - global_start_time:.2f} segundos.")
+        print(f"[DEBUG] Tiempo total de procesamiento: {global_end_time - global_start_time:.2f} segundos.")
         return combined_results
