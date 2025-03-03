@@ -32,13 +32,15 @@ class EndpointHandler:
         Procesa un lote de prompts y sus correspondientes imágenes.
         Los prompts se tokenizan usando text_max_length y, si add_bos es True,
         se añade un token BOS a la izquierda de cada secuencia.
+        Además, si el modelo utiliza position_ids, se ajusta la attention_mask para 
+        que tenga la longitud esperada (seq_len + max_new_tokens).
         """
         try:
             # Construimos el texto que va antes del prompt real
             batch_texts = [f"User: {p} Assistant:" for p in prompts_list]
             
-            # Tokenizamos la lista de textos de forma automática, con padding y truncado.
-            # Se usa text_max_length para dejar espacio al token BOS (si se añade)
+            # Tokenizamos la lista de textos con padding y truncado.
+            # Usamos text_max_length para dejar espacio al token BOS.
             tokenized = self.processor.tokenizer(
                 batch_texts,
                 padding='max_length',  # o 'longest' para padding dinámico
@@ -63,12 +65,12 @@ class EndpointHandler:
             # Procesamos cada imagen y su correspondiente prompt
             for i in range(len(batch_texts)):
                 try:
-                    # Extraemos la secuencia tokenizada correspondiente y la convertimos a lista
                     tokens = tokenized["input_ids"][i].tolist()
                     image = images_list[i].convert("RGB")
                     image = ImageOps.exif_transpose(image)
                     images_array = [np.array(image)]
-                    # Usamos sequence_length=token_max_length+1 para que, tras añadir el BOS, la secuencia final tenga token_max_length+1 tokens
+                    # Usamos sequence_length = text_max_length + 1 para que, tras añadir el BOS, 
+                    # la secuencia final tenga text_max_length+1 tokens.
                     out = self.processor.image_processor.multimodal_preprocess(
                         images=images_array,
                         image_idx=[-1],
@@ -98,15 +100,21 @@ class EndpointHandler:
                     logging.exception("Error al agrupar la key '%s' en outputs_list", key)
                     raise
 
-            # Generamos la máscara de atención a partir del token de padding
+            # Creamos la attention_mask a partir del token de padding
             batch_outputs["attention_mask"] = (batch_outputs["input_ids"] != pad_token_id).long()
 
             # Si se requiere, añadimos el token BOS al inicio de la secuencia
             if add_bos:
                 bos = self.processor.tokenizer.bos_token_id or self.processor.tokenizer.eos_token_id
                 batch_outputs["input_ids"] = F.pad(batch_outputs["input_ids"], (1, 0), value=bos)
-                # Actualizamos también la attention_mask para que tenga la misma longitud
                 batch_outputs["attention_mask"] = F.pad(batch_outputs["attention_mask"], (1, 0), value=1)
+
+            # Ahora, si el modelo utiliza position_ids, extendemos la attention_mask a la longitud esperada.
+            # Extraemos max_new_tokens del images_config (que en este caso contiene los parámetros de generación)
+            max_new_tokens_val = images_config.get("max_new_tokens", 0) if images_config is not None else 0
+            if self.model.config.use_position_ids and max_new_tokens_val > 0:
+                # Se añade padding a la derecha para que la máscara tenga longitud (seq_len + max_new_tokens)
+                batch_outputs["attention_mask"] = F.pad(batch_outputs["attention_mask"], (0, max_new_tokens_val), value=1)
 
             # Ajustamos la posición de image_input_idx si existe
             if "image_input_idx" in batch_outputs:
@@ -138,8 +146,7 @@ class EndpointHandler:
             logging.exception("Error al acceder al campo 'inputs'")
             return {"error": "Error al acceder al campo 'inputs'."}
 
-        # Extraemos parámetros adicionales de configuración para pruebas, fuera de generation_config.
-        # Por ejemplo, text_max_length y add_bos
+        # Extraemos parámetros adicionales de configuración para pruebas (fuera de generation_config)
         config_params = inputs_data.get("config", {})
         text_max_length = config_params.get("text_max_length", 1535)
         add_bos = config_params.get("add_bos", True)
@@ -174,7 +181,6 @@ class EndpointHandler:
         try:
             global_prompts_list = inputs_data.get("prompts", [])
             prompts_per_image = inputs_data.get("prompts_per_image", [])
-            # Diccionario: { image_id (str): [ {id, text}, {id, text}, ... ] }
             specific_prompts = {}
             for item in prompts_per_image:
                 if "id" in item and "prompts" in item:
