@@ -1,3 +1,4 @@
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -17,6 +18,7 @@ class EndpointHandler:
             self.processor = AutoProcessor.from_pretrained(
                 model_dir, trust_remote_code=True, torch_dtype="auto", device_map="auto"
             )
+
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_dir,
                 trust_remote_code=True,
@@ -27,29 +29,31 @@ class EndpointHandler:
             logging.exception("Error en la inicialización del modelo")
             raise
 
-    def process_batch(self, prompts_list, images_list, images_config=None, text_max_length=1535, add_bos=True):
+    def process_batch(self, prompts_list, images_list, images_config=None):
         """
-        Procesa un lote de prompts y sus correspondientes imágenes.
-        Los prompts se tokenizan usando text_max_length y, si add_bos es True,
-        se añade un token BOS a la izquierda de cada secuencia.
-        Además, si el modelo utiliza position_ids, se ajusta la attention_mask para 
-        que tenga la longitud esperada (seq_len + max_new_tokens).
+        Ahora recibe una lista de prompts (strings) y la lista de imágenes,
+        en vez de un único 'prompt' replicado.
         """
         try:
-            # Construimos el texto que va antes del prompt real
-            batch_texts = [f"User: {p} Assistant:" for p in prompts_list]
+            self.processor.tokenizer.padding_side = "left"
             
-            # Tokenizamos la lista de textos con padding y truncado.
-            # Usamos text_max_length para dejar espacio al token BOS.
-            tokenized = self.processor.tokenizer(
-                batch_texts,
-                padding='max_length',  # o 'longest' para padding dinámico
-                truncation=True,
-                max_length=text_max_length,
-                return_tensors='pt'
-            )
+            # Construimos el texto que va antes del prompt real
+            batch_texts = [f"{p}" for p in prompts_list]
 
-            print(tokenized)
+            # Tokenizamos cada prompt por separado
+            # tokens_list = [
+            #     self.processor.tokenizer.encode(" " + text, add_special_tokens=False)
+            #     for text in batch_texts
+            # ]
+
+            encoding = self.processor.tokenizer(
+                batch_texts,
+                add_special_tokens=False,
+                padding="longest",
+                truncation=True,
+                return_tensors="pt"
+            )
+            tokens_list = [encoding["input_ids"][i].numpy().astype(np.int32) for i in range(encoding["input_ids"].shape[0])]
 
             outputs_list = []
             images_kwargs = {
@@ -62,20 +66,18 @@ class EndpointHandler:
                 "image_padding_mask": True,
             }
 
-            # Procesamos cada imagen y su correspondiente prompt
+            # Para cada imagen y prompt, aplicamos el preprocesamiento multimodal
             for i in range(len(batch_texts)):
                 try:
-                    tokens = tokenized["input_ids"][i].tolist()
+                    tokens = tokens_list[i]
                     image = images_list[i].convert("RGB")
                     image = ImageOps.exif_transpose(image)
                     images_array = [np.array(image)]
-                    # Usamos sequence_length = text_max_length + 1 para que, tras añadir el BOS, 
-                    # la secuencia final tenga text_max_length+1 tokens.
                     out = self.processor.image_processor.multimodal_preprocess(
                         images=images_array,
                         image_idx=[-1],
                         tokens=np.asarray(tokens).astype(np.int32),
-                        sequence_length=text_max_length + 1,
+                        sequence_length=1536,
                         image_patch_token_id=self.processor.special_token_ids["<im_patch>"],
                         image_col_token_id=self.processor.special_token_ids["<im_col>"],
                         image_start_token_id=self.processor.special_token_ids["<im_start>"],
@@ -87,41 +89,31 @@ class EndpointHandler:
                     logging.exception("Error procesando la imagen número %d", i)
                     raise
 
-            # Combinamos las salidas en formato batch usando el token de padding del tokenizer
-            pad_token_id = self.processor.tokenizer.pad_token_id
+            # Agrupamos las salidas en formato 'batch'
             batch_outputs = {}
             for key in outputs_list[0].keys():
                 try:
                     tensors = [torch.from_numpy(out[key]) for out in outputs_list]
                     batch_outputs[key] = torch.nn.utils.rnn.pad_sequence(
-                        tensors, batch_first=True, padding_value=pad_token_id
+                        tensors, batch_first=True, padding_value=self.processor.tokenizer.pad_token_id
                     )
                 except Exception:
                     logging.exception("Error al agrupar la key '%s' en outputs_list", key)
                     raise
 
-            # Creamos la attention_mask a partir del token de padding
-            batch_outputs["attention_mask"] = (batch_outputs["input_ids"] != pad_token_id).long()
+            # Ajuste para BOS token
+            bos = self.processor.tokenizer.bos_token_id or self.processor.tokenizer.eos_token_id
+            batch_outputs["input_ids"] = F.pad(batch_outputs["input_ids"], (1, 0), value=bos)
 
-            # Si se requiere, añadimos el token BOS al inicio de la secuencia
-            if add_bos:
-                bos = self.processor.tokenizer.bos_token_id or self.processor.tokenizer.eos_token_id
-                batch_outputs["input_ids"] = F.pad(batch_outputs["input_ids"], (1, 0), value=bos)
-                batch_outputs["attention_mask"] = F.pad(batch_outputs["attention_mask"], (1, 0), value=1)
-
-            # Ahora, si el modelo utiliza position_ids, extendemos la attention_mask a la longitud esperada.
-            # Extraemos max_new_tokens del images_config (que en este caso contiene los parámetros de generación)
-            max_new_tokens_val = images_config.get("max_new_tokens", 0) if images_config is not None else 0
-            if self.model.config.use_position_ids and max_new_tokens_val > 0:
-                # Se añade padding a la derecha para que la máscara tenga longitud (seq_len + max_new_tokens)
-                batch_outputs["attention_mask"] = F.pad(batch_outputs["attention_mask"], (0, max_new_tokens_val), value=1)
-
-            # Ajustamos la posición de image_input_idx si existe
+            # Ajustamos la posición de image_input_idx
             if "image_input_idx" in batch_outputs:
                 image_input_idx = batch_outputs["image_input_idx"]
                 batch_outputs["image_input_idx"] = torch.where(
                     image_input_idx < 0, image_input_idx, image_input_idx + 1
                 )
+
+            print(f"Padding side: {self.processor.tokenizer.padding_side}")
+
 
             return batch_outputs
         except Exception:
@@ -145,11 +137,6 @@ class EndpointHandler:
         except Exception:
             logging.exception("Error al acceder al campo 'inputs'")
             return {"error": "Error al acceder al campo 'inputs'."}
-
-        # Extraemos parámetros adicionales de configuración para pruebas (fuera de generation_config)
-        config_params = inputs_data.get("config", {})
-        text_max_length = config_params.get("text_max_length", 1535)
-        add_bos = config_params.get("add_bos", True)
 
         # Cargar imágenes y sus IDs
         images_list = []
@@ -181,6 +168,7 @@ class EndpointHandler:
         try:
             global_prompts_list = inputs_data.get("prompts", [])
             prompts_per_image = inputs_data.get("prompts_per_image", [])
+            # Diccionario: { image_id (str): [ {id, text}, {id, text}, ... ] }
             specific_prompts = {}
             for item in prompts_per_image:
                 if "id" in item and "prompts" in item:
@@ -192,7 +180,7 @@ class EndpointHandler:
         # Preparamos la salida final
         final_results = {img_id: [] for img_id in ids}
 
-        # Configuración de generación (parámetros que se usan para el modelo)
+        # Configuración de generación
         try:
             batch_size = inputs_data.get("batch_size", len(images_list))
             generation_config = inputs_data.get("generation_config", {})
@@ -216,6 +204,7 @@ class EndpointHandler:
         flattened = []
         try:
             for img, img_id in zip(images_list, ids):
+                # Si la imagen tiene prompts específicos, los usas. Si no, usas los globales
                 image_prompts = specific_prompts.get(str(img_id), global_prompts_list)
                 for p in image_prompts:
                     flattened.append((img, img_id, p["id"], p["text"]))
@@ -228,25 +217,14 @@ class EndpointHandler:
         try:
             for start in range(0, len(flattened), batch_size):
                 chunk = flattened[start:start+batch_size]
-                # Registro de log para el lote actual (acortamos el prompt a 100 palabras)
-                batch_log = []
-                for item in chunk:
-                    photo_id = item[1]
-                    prompt_id = item[2]
-                    prompt_text = item[3]
-                    shortened = ' '.join(prompt_text.split()[:100])
-                    batch_log.append({"photo_id": photo_id, "prompt_id": prompt_id, "prompt_text": shortened})
-                logging.info(f"Lote {start // batch_size + 1}: {batch_log}")
-
+                # Extraemos imágenes y prompts
                 batch_imgs = [x[0] for x in chunk]
                 batch_img_ids = [x[1] for x in chunk]
                 batch_prompt_ids = [x[2] for x in chunk]
                 batch_prompt_texts = [x[3] for x in chunk]
 
-                inputs_batch = self.process_batch(
-                    batch_prompt_texts, batch_imgs, generation_config, 
-                    text_max_length=text_max_length, add_bos=add_bos
-                )
+                # Preprocesamos
+                inputs_batch = self.process_batch(batch_prompt_texts, batch_imgs, generation_config)
                 inputs_batch = {k: v.to(self.model.device) for k, v in inputs_batch.items()}
 
                 if use_bfloat16 and "images" in inputs_batch:
@@ -259,11 +237,13 @@ class EndpointHandler:
                         tokenizer=self.processor.tokenizer,
                     )
 
+                # Decodificamos
                 input_len = inputs_batch["input_ids"].shape[1]
                 generated_texts = self.processor.tokenizer.batch_decode(
                     outputs[:, input_len:], skip_special_tokens=True
                 )
 
+                # 3) Asignamos cada descripción generada a la imagen y prompt correctos
                 for idx, text in enumerate(generated_texts):
                     final_results[batch_img_ids[idx]].append({
                         "id_prompt": batch_prompt_ids[idx],
@@ -287,3 +267,7 @@ class EndpointHandler:
         except Exception:
             logging.exception("Error al combinar los resultados finales")
             return {"error": "Error al combinar los resultados finales."}
+
+
+
+

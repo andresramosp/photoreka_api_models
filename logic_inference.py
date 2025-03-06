@@ -2,11 +2,63 @@ import time
 import torch
 from datasets import Dataset
 from sentence_transformers import util
+from transformers import pipeline
 from nltk.stem import WordNetLemmatizer
 import inflect
+from summarizer import Summarizer
+from nltk.tokenize import sent_tokenize
+import nltk
+import concurrent.futures
+
+nltk.download('punkt_tab')
 
 # Importar dependencias comunes desde api.py
-from api import embeddings_model, roberta_classifier_text, cache
+from api import embeddings_model, roberta_classifier_text, cache, bart_classifier
+
+def generate_groups_for_tags(data: dict):
+    batch_size = 16
+    threshold = 0.2
+    tags = data.get("tags", [])
+    groups = data.get("groups", ['person', 'objects', 'animals', 'places', 'feeling', 'weather', 'symbols'])
+    candidate_groups = [f"main subject is a {group}" for group in groups]
+    
+    def process_batch(batch_tags):
+        batch_result = {}
+        for tag in batch_tags:
+            res = bart_classifier(tag, candidate_groups)
+            if res['scores'][0] < threshold:
+                best_group = "misc"
+            else:
+                best_group = res['labels'][0].replace("main subject is a ", "")
+            batch_result[tag] = best_group
+        return batch_result
+
+    final_results = {}
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = [executor.submit(process_batch, tags[i:i+batch_size]) for i in range(0, len(tags), batch_size)]
+        for future in concurrent.futures.as_completed(futures):
+            final_results.update(future.result())
+    
+    return [f"{tag} | {group}" for tag, group in final_results.items()]
+
+
+def extractive_summarize_text(data: dict):
+
+    ratio = data.get("ratio", 0.5)
+    texts = data.get("texts", [])
+    
+    if not texts or not isinstance(texts, list):
+        raise ValueError("Falta el campo requerido 'texts' o no es una lista.")
+    
+    model = Summarizer()
+    summaries = []
+    
+    for text in texts:
+        summary = model(text, ratio=ratio)
+        summaries.append(summary)
+    
+    return {"summaries": summaries}
+
 
 def preprocess_text(text, to_singular=False):
     lemmatizer = WordNetLemmatizer()

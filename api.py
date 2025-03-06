@@ -32,17 +32,22 @@ def load_common_models():
         device=0 if device == "cuda" else -1
     )
     ner_model = pipeline("ner", model="FacebookAI/xlm-roberta-large-finetuned-conll03-english", aggregation_strategy="simple", device=0 if device == "cuda" else -1)
+    bart_classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
     nlp = spacy.load("en_core_web_sm")
-    return embeddings_model, roberta_classifier_text, nlp, ner_model
+        # Inicializamos el pipeline de resumen usando BART
 
-embeddings_model, roberta_classifier_text, nlp, ner_model = load_common_models()
+    return embeddings_model, roberta_classifier_text, nlp, ner_model, bart_classifier
+
+embeddings_model, roberta_classifier_text, nlp, ner_model, bart_classifier = load_common_models()
 cache = TTLCache(maxsize=200000, ttl=3600)
 
 # Importar la lógica de inferencia desde el archivo externo
 from logic_inference import (
     adjust_tags_proximities_by_context_inference_logic,
     adjust_descs_proximities_by_context_inference_logic,
-    get_embeddings_logic
+    get_embeddings_logic,
+    extractive_summarize_text,
+    generate_groups_for_tags
 )
 
 # Importar funciones de segmentación de query desde query_segment.py
@@ -78,6 +83,18 @@ async def query_segment_endpoint(request: Request):
 async def query_segment_endpoint(request: Request):
     data = await request.json()
     result = remove_photo_prefix(data["query"])
+    return JSONResponse(content=result)
+
+@app.post("/summarize_texts")
+async def summarize_texts_endpoint(request: Request):
+    data = await request.json()
+    result = extractive_summarize_text(data)
+    return JSONResponse(content=result)
+
+@app.post("/generate_groups_for_tags")
+async def summarize_textsgenerate_groups_for_tags_endpoint(request: Request):
+    data = await request.json()
+    result = generate_groups_for_tags(data)
     return JSONResponse(content=result)
 
 if __name__ == "__main__":
