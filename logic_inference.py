@@ -20,7 +20,7 @@ def generate_groups_for_tags(data: dict):
     batch_size = 16
     threshold = 0.2
     tags = data.get("tags", [])
-    groups = data.get("groups", ['person', 'objects', 'animals', 'places', 'feeling', 'weather', 'symbols'])
+    groups = data.get("groups", ['person', 'objects', 'animals', 'places', 'feeling', 'weather', 'symbols', 'concept or idea'])
     candidate_groups = [f"main subject is a {group}" for group in groups]
     
     def process_batch(batch_tags):
@@ -203,6 +203,8 @@ def purge_text(text: str, purge_list: list) -> str:
     # Eliminación directa de coincidencias exactas
     for candidate in purge_list:
         text = text.replace(candidate, "")
+
+    return text
     
     # Tokenización y eliminación por similitud semántica
     tokens = word_tokenize(text)
@@ -215,7 +217,7 @@ def purge_text(text: str, purge_list: list) -> str:
     for token, token_emb in zip(tokens, token_embeddings):
         remove = False
         for cand_emb in candidate_embeddings:
-            if util.cos_sim(token_emb, cand_emb).item() >= 0.8:
+            if util.cos_sim(token_emb, cand_emb).item() >= 0.45:
                 remove = True
                 break
         if not remove:
@@ -227,23 +229,21 @@ def purge_text(text: str, purge_list: list) -> str:
     cleaned_text = detokenizer.detokenize(tokens_to_keep)
     return cleaned_text
 
-def clean_texts(data: dict) -> list:
-    """
-    Recibe una lista de textos y una lista de cadenas a eliminar.
-    Para cada texto se aplica extractive_summarize_text y luego purge_text.
-    Se utiliza concurrencia para procesarlos de la forma más eficiente posible.
-    
-    """
-    texts= data.get("texts")
-    purge_list = data.get("purge_list")
-    extract_ratio = data.get("extract_ratio")
 
-    def process_text(text):
-        summary = extractive_summarize_text({"texts": [text], "ratio": extract_ratio})["summaries"][0]
-        return purge_text(summary, purge_list)
+def clean_texts(data: dict) -> list:
+    texts = data.get("texts")
+    purge_list = data.get("purge_list")
+    extract_ratio = data.get("extract_ratio", 0.9)
+
+    # Resumir todos los textos con una única instancia del modelo
+    model = Summarizer()
+    summaries = [model(text, ratio=extract_ratio) for text in texts]
     
+    # Precomputar las embeddings de purge_list para reutilizarlas
+    # candidate_embeddings = embeddings_model.encode(purge_list, convert_to_tensor=False)
+    
+    # Limpiar los resúmenes en paralelo
     with concurrent.futures.ThreadPoolExecutor() as executor:
-        # Usamos map para preservar el orden de los textos originales
-        cleaned_texts = list(executor.map(process_text, texts))
+        cleaned_texts = list(executor.map(lambda s: purge_text(s, purge_list), summaries))
     return cleaned_texts
 
