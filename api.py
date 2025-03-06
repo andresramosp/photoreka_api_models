@@ -46,7 +46,7 @@ from logic_inference import (
     adjust_tags_proximities_by_context_inference_logic,
     adjust_descs_proximities_by_context_inference_logic,
     get_embeddings_logic,
-    extractive_summarize_text,
+    clean_texts,
     generate_groups_for_tags
 )
 
@@ -85,14 +85,14 @@ async def query_segment_endpoint(request: Request):
     result = remove_photo_prefix(data["query"])
     return JSONResponse(content=result)
 
-@app.post("/summarize_texts")
-async def summarize_texts_endpoint(request: Request):
+@app.post("/clean_texts")
+async def clean_texts_endpoint(request: Request):
     data = await request.json()
-    result = extractive_summarize_text(data)
+    result = clean_texts(data)
     return JSONResponse(content=result)
 
 @app.post("/generate_groups_for_tags")
-async def summarize_textsgenerate_groups_for_tags_endpoint(request: Request):
+async def generate_groups_for_tags_endpoint(request: Request):
     data = await request.json()
     result = generate_groups_for_tags(data)
     return JSONResponse(content=result)

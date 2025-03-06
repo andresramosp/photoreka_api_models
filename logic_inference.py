@@ -6,8 +6,9 @@ from transformers import pipeline
 from nltk.stem import WordNetLemmatizer
 import inflect
 from summarizer import Summarizer
-from nltk.tokenize import sent_tokenize
+from nltk.tokenize import sent_tokenize, word_tokenize
 import nltk
+# import asyncio
 import concurrent.futures
 
 nltk.download('punkt_tab')
@@ -44,7 +45,7 @@ def generate_groups_for_tags(data: dict):
 
 def extractive_summarize_text(data: dict):
 
-    ratio = data.get("ratio", 0.5)
+    ratio = data.get("ratio", 0.9)
     texts = data.get("texts", [])
     
     if not texts or not isinstance(texts, list):
@@ -191,3 +192,58 @@ def get_embeddings_logic(data: dict):
         raise ValueError("Field 'tags' must be a list.")
     embeddings = embeddings_model.encode(tags, convert_to_tensor=False)
     return {"tags": tags, "embeddings": [emb.tolist() for emb in embeddings]}
+
+def purge_text(text: str, purge_list: list) -> str:
+    """
+    Elimina del texto todas las ocurrencias de las cadenas de purge_list.
+    Primero se hace una eliminación directa de coincidencias exactas y luego,
+    tokenizando el texto, se eliminan aquellos tokens cuya similitud semántica con
+    algún elemento de purge_list sea >= 0.85.
+    """
+    # Eliminación directa de coincidencias exactas
+    for candidate in purge_list:
+        text = text.replace(candidate, "")
+    
+    # Tokenización y eliminación por similitud semántica
+    tokens = word_tokenize(text)
+    # Obtener embeddings de la lista de cadenas a purgar
+    candidate_embeddings = embeddings_model.encode(purge_list, convert_to_tensor=False)
+    # Obtener embeddings para cada token
+    token_embeddings = embeddings_model.encode(tokens, convert_to_tensor=False)
+    
+    tokens_to_keep = []
+    for token, token_emb in zip(tokens, token_embeddings):
+        remove = False
+        for cand_emb in candidate_embeddings:
+            if util.cos_sim(token_emb, cand_emb).item() >= 0.8:
+                remove = True
+                break
+        if not remove:
+            tokens_to_keep.append(token)
+    
+    # Reconstruir el texto utilizando el detokenizador de NLTK
+    from nltk.tokenize.treebank import TreebankWordDetokenizer
+    detokenizer = TreebankWordDetokenizer()
+    cleaned_text = detokenizer.detokenize(tokens_to_keep)
+    return cleaned_text
+
+def clean_texts(data: dict) -> list:
+    """
+    Recibe una lista de textos y una lista de cadenas a eliminar.
+    Para cada texto se aplica extractive_summarize_text y luego purge_text.
+    Se utiliza concurrencia para procesarlos de la forma más eficiente posible.
+    
+    """
+    texts= data.get("texts")
+    purge_list = data.get("purge_list")
+    extract_ratio = data.get("extract_ratio")
+
+    def process_text(text):
+        summary = extractive_summarize_text({"texts": [text], "ratio": extract_ratio})["summaries"][0]
+        return purge_text(summary, purge_list)
+    
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        # Usamos map para preservar el orden de los textos originales
+        cleaned_texts = list(executor.map(process_text, texts))
+    return cleaned_texts
+
