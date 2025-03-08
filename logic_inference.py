@@ -6,15 +6,73 @@ from transformers import pipeline
 from nltk.stem import WordNetLemmatizer
 import inflect
 from summarizer import Summarizer
-from nltk.tokenize import sent_tokenize, word_tokenize
+from nltk.tokenize import word_tokenize
 import nltk
+import re
 # import asyncio
 import concurrent.futures
 
+nltk.download('punkt', quiet=True)
+nltk.download('averaged_perceptron_tagger', quiet=True)
 nltk.download('punkt_tab')
+nltk.download('averaged_perceptron_tagger_eng')
 
 # Importar dependencias comunes desde api.py
-from api import embeddings_model, roberta_classifier_text, cache, bart_classifier
+from api import embeddings_model, roberta_classifier_text, cache, bart_classifier, nlp
+
+def remove_leading_articles(text: str) -> str:
+    """
+    Elimina artículos iniciales comunes (a, an, the) de un texto.
+    """
+    return re.sub(r"^(a|an|the)\s+", "", text, flags=re.IGNORECASE)
+
+def extract_tags_spacy(text: str, allowed_groups: list):
+    """
+    Extrae entidades y sintagmas nominales usando spaCy y retorna los tags con grupo,
+    filtrando solo aquellos tags cuyo grupo esté en allowed_groups y removiendo los artículos iniciales.
+    Se asume que 'nlp' y 'generate_groups_for_tags' ya están definidos globalmente.
+    """
+    doc = nlp(text)
+    tags = set()
+    # Extraer entidades nombradas
+    for ent in doc.ents:
+        tags.add(ent.text)
+    # Extraer sintagmas nominales
+    for chunk in doc.noun_chunks:
+        tags.add(chunk.text)
+    # Generar tags con sus grupos, pasando los grupos permitidos
+    all_tags = generate_groups_for_tags({"tags": list(tags), "groups": allowed_groups})
+    # Filtrar por tags que pertenezcan a los grupos permitidos
+    filtered_tags = [item for item in all_tags if item.split(" | ")[1] in allowed_groups]
+    # Remover las partículas iniciales de la parte del tag
+    cleaned_tags = []
+    for tag in filtered_tags:
+        parts = tag.split(" | ")
+        cleaned_tag = remove_leading_articles(parts[0].strip())
+        cleaned_tags.append(f"{cleaned_tag} | {parts[1]}")
+    return cleaned_tags
+
+def extract_tags_ntlk(text: str):
+    """
+    Extrae sintagmas nominales usando NLTK y una gramática simple, y retorna los tags con grupo.
+    """
+    sentences = nltk.sent_tokenize(text)
+    tags = []
+    # Gramática simple para extraer sintagmas nominales (opcionalmente puedes ajustar la gramática)
+    grammar = "NP: {<DT>?<JJ>*<NN.*>+}"
+    cp = nltk.RegexpParser(grammar)
+    
+    for sentence in sentences:
+        words = nltk.word_tokenize(sentence)
+        tagged = nltk.pos_tag(words)
+        tree = cp.parse(tagged)
+        for subtree in tree.subtrees(filter=lambda t: t.label() == 'NP'):
+            phrase = " ".join(word for word, tag in subtree.leaves())
+            tags.append(phrase)
+    
+    # Eliminar duplicados y pasar a generate_groups_for_tags
+    return generate_groups_for_tags({"tags": list(set(tags))})
+
 
 def generate_groups_for_tags(data: dict):
     batch_size = 16
@@ -79,14 +137,10 @@ def preprocess_text(text, to_singular=False):
 def combine_tag_name_with_group(tag):
     if tag.get("group") == "symbols":
         return f"{tag['name']} (symbol or sign)"
-    if tag.get("group") == "culture":
-        return f"{tag['name']} culture"
-    if tag.get("group") == "location":
+    if tag.get("group") == "places":
         return f"{tag['name']} (place)"
-    if tag.get("group") == "generic":
+    if tag.get("group") == "abstract concept":
         return f"{tag['name']} (as general topic)"
-    if tag.get("group") == "theme":
-        return f"{tag['name']} (as general theme)"
     if tag.get("group") == "objects":
         return f"{tag['name']} (physical thing)"
     return tag["name"]
@@ -190,8 +244,12 @@ def get_embeddings_logic(data: dict):
     tags = data.get("tags", [])
     if not tags or not isinstance(tags, list):
         raise ValueError("Field 'tags' must be a list.")
-    embeddings = embeddings_model.encode(tags, convert_to_tensor=False)
-    return {"tags": tags, "embeddings": [emb.tolist() for emb in embeddings]}
+    with torch.inference_mode():
+        embeddings_tensor = embeddings_model.encode(tags, batch_size=16, convert_to_tensor=True)
+    embeddings = embeddings_tensor.cpu().tolist()
+    return {"tags": tags, "embeddings": embeddings}
+
+
 
 def purge_text(text: str, purge_list: list) -> str:
     """
@@ -235,15 +293,12 @@ def clean_texts(data: dict) -> list:
     purge_list = data.get("purge_list")
     extract_ratio = data.get("extract_ratio", 0.9)
 
-    # Resumir todos los textos con una única instancia del modelo
-    model = Summarizer()
-    summaries = [model(text, ratio=extract_ratio) for text in texts]
-    
-    # Precomputar las embeddings de purge_list para reutilizarlas
-    # candidate_embeddings = embeddings_model.encode(purge_list, convert_to_tensor=False)
+    # Cambiar a un modelo que permita concurrencia
+    # model = Summarizer()
+    # summaries = model(texts, ratio=extract_ratio)  # Procesamiento en batch
     
     # Limpiar los resúmenes en paralelo
     with concurrent.futures.ThreadPoolExecutor() as executor:
-        cleaned_texts = list(executor.map(lambda s: purge_text(s, purge_list), summaries))
+        cleaned_texts = list(executor.map(lambda s: purge_text(s, purge_list), texts))
     return cleaned_texts
 

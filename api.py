@@ -47,7 +47,9 @@ from logic_inference import (
     adjust_descs_proximities_by_context_inference_logic,
     get_embeddings_logic,
     clean_texts,
-    generate_groups_for_tags
+    generate_groups_for_tags,
+    extract_tags_ntlk,
+    extract_tags_spacy
 )
 
 # Importar funciones de segmentación de query desde query_segment.py
@@ -95,6 +97,15 @@ async def clean_texts_endpoint(request: Request):
 async def generate_groups_for_tags_endpoint(request: Request):
     data = await request.json()
     result = generate_groups_for_tags(data)
+    return JSONResponse(content=result)
+
+@app.post("/extract_tags")
+async def extract_tags_endpoint(request: Request):
+    data = await request.json()
+    if data.get("method") == "spacy":
+        result = extract_tags_spacy(data.get("text"), data.get("allowed_groups"))
+    if data.get("method") == "ntlk":
+        result = extract_tags_ntlk(data.get("text"))
     return JSONResponse(content=result)
 
 if __name__ == "__main__":
