@@ -194,7 +194,7 @@ class EndpointHandler:
                 top_k=generation_config.get("top_k", 50),
                 length_penalty=generation_config.get("length_penalty", 1),
                 stop_strings="<|endoftext|>",
-                do_sample=True
+                do_sample=generation_config.get("do_sample", False)
             )
         except Exception:
             logging.exception("Error al configurar la generación")
