@@ -4,6 +4,7 @@ from itertools import cycle
 from nltk.corpus import wordnet as wn
 from nltk.stem import WordNetLemmatizer
 from sentence_transformers import util
+import time
 
 # Importar dependencias comunes desde api.py
 from api import embeddings_model, nlp, ner_model
@@ -17,7 +18,7 @@ class QueryRequest(BaseModel):
 
 
 def remove_photo_prefix(query: str):
-    print(f"🔍 Processing query: {query}")
+    start_time = time.perf_counter()
 
     PREFIX_EMBEDDINGS = embeddings_model.encode(QUERY_PREFIXES, convert_to_tensor=True)
     words = query.lower().split()
@@ -32,11 +33,11 @@ def remove_photo_prefix(query: str):
             if any(similarity.item() > 0.78 for similarity in similarities):
                 matched_prefix = segment  # Guardar el prefijo más largo posible
 
+    print(f"⏳  [Remove Photo Prefix - {query}] Tiempo de ejecución: {time.perf_counter() - start_time:.4f} segundos")
+    
     if matched_prefix:
-        print(f"✅ Prefix detected and removed: {matched_prefix}")
         return query[len(matched_prefix):].strip()  # Eliminar prefijo más largo detectado
 
-    print("❌ No irrelevant prefix detected.")
     return query
 
 

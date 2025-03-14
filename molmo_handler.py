@@ -1,10 +1,10 @@
-
 import numpy as np
 import torch
 import torch.nn.functional as F
 import requests
 from PIL import Image, ImageOps
 import io, base64, json, traceback, time
+import gc
 from transformers import AutoModelForCausalLM, AutoProcessor, GenerationConfig
 import logging
 
@@ -39,12 +39,6 @@ class EndpointHandler:
             
             # Construimos el texto que va antes del prompt real
             batch_texts = [f"{p}" for p in prompts_list]
-
-            # Tokenizamos cada prompt por separado
-            # tokens_list = [
-            #     self.processor.tokenizer.encode(" " + text, add_special_tokens=False)
-            #     for text in batch_texts
-            # ]
 
             encoding = self.processor.tokenizer(
                 batch_texts,
@@ -113,8 +107,6 @@ class EndpointHandler:
                 )
 
             print(f"Padding side: {self.processor.tokenizer.padding_side}")
-
-
             return batch_outputs
         except Exception:
             logging.exception("Error en process_batch")
@@ -168,7 +160,6 @@ class EndpointHandler:
         try:
             global_prompts_list = inputs_data.get("prompts", [])
             prompts_per_image = inputs_data.get("prompts_per_image", [])
-            # Diccionario: { image_id (str): [ {id, text}, {id, text}, ... ] }
             specific_prompts = {}
             for item in prompts_per_image:
                 if "id" in item and "prompts" in item:
@@ -177,7 +168,6 @@ class EndpointHandler:
             logging.exception("Error al construir el mapeo de prompts por imagen")
             return {"error": "Error al construir el mapeo de prompts por imagen."}
 
-        # Preparamos la salida final
         final_results = {img_id: [] for img_id in ids}
 
         # Configuración de generación
@@ -204,7 +194,6 @@ class EndpointHandler:
         flattened = []
         try:
             for img, img_id in zip(images_list, ids):
-                # Si la imagen tiene prompts específicos, los usas. Si no, usas los globales
                 image_prompts = specific_prompts.get(str(img_id), global_prompts_list)
                 for p in image_prompts:
                     flattened.append((img, img_id, p["id"], p["text"]))
@@ -212,51 +201,49 @@ class EndpointHandler:
             logging.exception("Error aplanando prompts por imagen")
             return {"error": "Error aplanando prompts por imagen."}
 
-        # 2) Procesamos en lotes la lista aplanada
         print(f"[Info] Inicio de proceso por lotes sobre diccionario: {flattened}.")
+
         try:
             for start in range(0, len(flattened), batch_size):
                 chunk = flattened[start:start+batch_size]
-                # Extraemos imágenes y prompts
                 batch_imgs = [x[0] for x in chunk]
                 batch_img_ids = [x[1] for x in chunk]
                 batch_prompt_ids = [x[2] for x in chunk]
                 batch_prompt_texts = [x[3] for x in chunk]
 
-                # Preprocesamos
                 inputs_batch = self.process_batch(batch_prompt_texts, batch_imgs, generation_config)
                 inputs_batch = {k: v.to(self.model.device) for k, v in inputs_batch.items()}
 
                 if use_bfloat16 and "images" in inputs_batch:
                     inputs_batch["images"] = inputs_batch["images"].to(torch.bfloat16)
 
-                with torch.inference_mode():
+                with torch.no_grad():
                     outputs = self.model.generate_from_batch(
                         inputs_batch,
                         gen_config,
                         tokenizer=self.processor.tokenizer,
                     )
 
-                # Decodificamos
                 input_len = inputs_batch["input_ids"].shape[1]
                 generated_texts = self.processor.tokenizer.batch_decode(
                     outputs[:, input_len:], skip_special_tokens=True
                 )
 
-                # 3) Asignamos cada descripción generada a la imagen y prompt correctos
                 for idx, text in enumerate(generated_texts):
                     final_results[batch_img_ids[idx]].append({
                         "id_prompt": batch_prompt_ids[idx],
                         "description": text
                     })
                 
+                # Limpieza: eliminar referencias y liberar memoria
+                del inputs_batch, outputs
+                gc.collect()
                 torch.cuda.empty_cache()
 
         except Exception:
             logging.exception("Error al procesar los lotes aplanados")
             return {"error": "Error al procesar los lotes aplanados."}
 
-        # 4) Preparamos la salida final
         try:
             combined_results = [
                 {"id": img_id, "descriptions": descs}
@@ -267,7 +254,3 @@ class EndpointHandler:
         except Exception:
             logging.exception("Error al combinar los resultados finales")
             return {"error": "Error al combinar los resultados finales."}
-
-
-
-

@@ -151,7 +151,7 @@ def cached_inference(batch_queries, batch_size):
     indexes_to_infer = []
 
     for i, query in enumerate(batch_queries):
-        if query in cache:
+        if False:#query in cache:
             cached_results.append(cache[query])
         else:
             queries_to_infer.append(query)
@@ -197,13 +197,15 @@ def adjust_tags_proximities_by_context_inference_logic(data: dict):
             adjusted_score = -score
 
         results[tag_name] = {"adjusted_proximity": adjusted_score, "label": label, "score": score}
-        if label == "entailment":
-            print(f"✅ [TAG MATCH] {tag_name} -> {term}: {label.upper()} con score {score:.4f}")
+        # if label == "entailment":
+        #     print(f"✅ [TAG MATCH] {tag_name} -> {term}: {label.upper()} con score {score:.4f}")
 
-    print(f"⏳ Tiempo de ejecución: {time.perf_counter() - start_time:.4f} segundos")
+    print(f"⏳ [Adjust Tags Proximities] - {term} Tiempo de ejecución para {len(batch_queries)}: {time.perf_counter() - start_time:.4f} segundos")
     return results
 
 def adjust_descs_proximities_by_context_inference_logic(data: dict):
+    start_time = time.perf_counter()
+
     BATCH_SIZE = 128
 
     term = preprocess_text(data.get("term", ""), True)
@@ -235,18 +237,24 @@ def adjust_descs_proximities_by_context_inference_logic(data: dict):
             adjusted_score = 0
 
         results[chunk_name] = {"adjusted_proximity": adjusted_score, "label": label, "score": score}
-        if label == "entailment":
-            print(f"✅ [DESC MATCH] {chunk_name} -> {term}: {label.upper()} con score {score:.4f}")
+        # if label == "entailment":
+        #     print(f"✅ [DESC MATCH] {chunk_name} -> {term}: {label.upper()} con score {score:.4f}")
 
+    print(f"⏳ [Adjust Descs Proximities - {term}] Tiempo de ejecución para {len(batch_queries)}: {time.perf_counter() - start_time:.4f} segundos")
     return results
 
 def get_embeddings_logic(data: dict):
+    start_time = time.perf_counter()
+
     tags = data.get("tags", [])
     if not tags or not isinstance(tags, list):
         raise ValueError("Field 'tags' must be a list.")
     with torch.inference_mode():
         embeddings_tensor = embeddings_model.encode(tags, batch_size=16, convert_to_tensor=True)
     embeddings = embeddings_tensor.cpu().tolist()
+
+    print(f"⏳  [Get Embeddings] Tiempo de ejecución: {time.perf_counter() - start_time:.4f} segundos")
+
     return {"tags": tags, "embeddings": embeddings}
 
 

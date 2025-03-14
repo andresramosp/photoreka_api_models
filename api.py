@@ -3,22 +3,28 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 import uvicorn
 import torch
-import nltk
+# import nltk
 from sentence_transformers import SentenceTransformer, util
 from transformers import pipeline, AutoTokenizer
 import spacy
 from cachetools import TTLCache
+import asyncio
+
+# nltk.download('punkt', quiet=True)
+# nltk.download('averaged_perceptron_tagger', quiet=True)
+# nltk.download('punkt_tab')
+# nltk.download('averaged_perceptron_tagger_eng')
 
 # Carga de dependencias comunes
-def load_wordnet():
-    try:
-        nltk.data.find('corpora/wordnet')
-        nltk.data.find('corpora/omw-1.4')
-    except LookupError:
-        nltk.download('wordnet')
-        nltk.download('omw-1.4')
+# def load_wordnet():
+#     try:
+#         nltk.data.find('corpora/wordnet')
+#         nltk.data.find('corpora/omw-1.4')
+#     except LookupError:
+#         nltk.download('wordnet')
+#         nltk.download('omw-1.4')
 
-load_wordnet()
+# load_wordnet()
 
 def load_common_models():
     print("PyTorch version:", torch.__version__)
@@ -60,19 +66,19 @@ app = FastAPI()
 @app.post("/adjust_tags_proximities_by_context_inference")
 async def adjust_tags_endpoint(request: Request):
     data = await request.json()
-    results = adjust_tags_proximities_by_context_inference_logic(data)
+    results = await asyncio.to_thread(adjust_tags_proximities_by_context_inference_logic, data)
     return JSONResponse(content=results)
 
 @app.post("/adjust_descs_proximities_by_context_inference")
 async def adjust_descs_endpoint(request: Request):
     data = await request.json()
-    results = adjust_descs_proximities_by_context_inference_logic(data)
+    results = await asyncio.to_thread(adjust_descs_proximities_by_context_inference_logic, data)
     return JSONResponse(content=results)
 
 @app.post("/get_embeddings")
 async def get_embeddings_endpoint(request: Request):
     data = await request.json()
-    results = get_embeddings_logic(data)
+    results = await asyncio.to_thread(get_embeddings_logic, data)
     return JSONResponse(content=results)
 
 @app.post("/query_segment")
@@ -108,5 +114,5 @@ async def extract_tags_endpoint(request: Request):
         result = extract_tags_ntlk(data.get("text"))
     return JSONResponse(content=result)
 
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=5000, reload=True)
+# if __name__ == "__main__":
+#     uvicorn.run(app, host="0.0.0.0", port=5000, reload=True, access_log=False)
