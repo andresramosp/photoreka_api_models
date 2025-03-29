@@ -87,7 +87,7 @@ def preprocess_text(text, to_singular=False):
 def combine_tag_name_with_group(tag):
     if tag.get("group") == "symbols":
         return f"{tag['name']} (symbol or sign)"
-    if tag.get("group") == "places":
+    if tag.get("group") == "environment":
         return f"{tag['name']} (place)"
     if tag.get("group") == "abstract concept":
         return f"{tag['name']} (as general topic)"

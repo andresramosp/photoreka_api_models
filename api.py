@@ -12,6 +12,7 @@ from logic_inference import (
     extract_tags_ntlk,
     extract_tags_spacy
 )
+from image_analyzer import (get_image_embeddings_from_base64)
 from query_segment import query_segment, remove_photo_prefix
 
 app = FastAPI()
@@ -32,6 +33,13 @@ async def adjust_descs_endpoint(request: Request):
 async def get_embeddings_endpoint(request: Request):
     data = await request.json()
     results = await asyncio.to_thread(get_embeddings_logic, data)
+    return JSONResponse(content=results)
+
+@app.post("/get_embeddings_image")
+async def get_embeddings_image_endpoint(request: Request):
+    data = await request.json()  # Espera {"images": [{id, base64}, ...]}
+    items = data["images"]
+    results = await asyncio.to_thread(get_image_embeddings_from_base64, items)
     return JSONResponse(content=results)
 
 @app.post("/query_segment")
@@ -68,6 +76,8 @@ async def extract_tags_endpoint(request: Request):
     else:
         result = {"error": "Método no soportado"}
     return JSONResponse(content=result)
+
+
 
 # if __name__ == "__main__":
 #     uvicorn.run(app, host="0.0.0.0", port=5000, reload=True, access_log=False)
