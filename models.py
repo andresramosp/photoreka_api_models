@@ -4,6 +4,7 @@ from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassifica
 import spacy
 from cachetools import TTLCache
 import nltk
+from ultralytics import YOLO
 
 # Descargas NLTK (se realizan al importar el módulo)
 nltk.download('punkt', quiet=True)
@@ -33,6 +34,10 @@ def init_models():
     bart_classifier = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
     nlp = spacy.load("en_core_web_sm")
     cache = TTLCache(maxsize=200000, ttl=3600)
+
+    yolo_model = YOLO("yolov8n.pt")
+    # print(yolo_model.model.names)
+
     return {
         "embeddings_model": embeddings_model,
         "roberta_classifier_text": roberta_classifier_text,
@@ -40,6 +45,7 @@ def init_models():
         "bart_classifier": bart_classifier,
         "nlp": nlp,
         "cache": cache,
+        "yolo_model": yolo_model
     }
 
 # Cargar MODELS al momento de la importación

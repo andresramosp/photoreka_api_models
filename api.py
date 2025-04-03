@@ -1,8 +1,10 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+import base64
+from io import BytesIO
 import asyncio
-import uvicorn
-from models import MODELS
+from PIL import Image
+from fastapi import FastAPI, Request, UploadFile, File, Form
 from logic_inference import (
     adjust_tags_proximities_by_context_inference_logic,
     adjust_descs_proximities_by_context_inference_logic,
@@ -12,7 +14,7 @@ from logic_inference import (
     extract_tags_ntlk,
     extract_tags_spacy
 )
-from image_analyzer import (get_image_embeddings_from_base64)
+from image_analyzer import (get_image_embeddings_from_base64, generate_presence_map, find_similar_presence_maps_by_id, process_yolo_detections, process_grounding_dino_detections)
 from query_segment import query_segment, remove_photo_prefix
 
 app = FastAPI()
@@ -41,6 +43,83 @@ async def get_embeddings_image_endpoint(request: Request):
     items = data["images"]
     results = await asyncio.to_thread(get_image_embeddings_from_base64, items)
     return JSONResponse(content=results)
+
+@app.post("/detect_objects_raw")
+async def detect_objects_raw(
+    files: list[UploadFile] = File(...),
+    categories: list[str] = Form(...),
+    min_box_size: int = Form(...)
+):
+    """
+    Endpoint que recibe archivos raw (multipart/form-data) junto con:
+      - "categories": [lista de strings]
+      - "min_box_size": entero
+    """
+    items = []
+    for file in files:
+        id_ = file.filename
+        content = await file.read()
+        img = Image.open(BytesIO(content)).convert("RGB")
+        items.append({"id": id_, "image": img})
+    results = await asyncio.to_thread(process_grounding_dino_detections, items, categories, min_box_size)
+    return JSONResponse(content=results)
+
+@app.post("/detect_objects_base64")
+async def detect_objects_base64(request: Request):
+    data = await request.json()  # Espera {"images": [{id, base64}, ...], "categories": [...], "min_box_size": int}
+
+    images = data.get("images", [])
+    categories = data.get("categories", [])
+    min_box_size = data.get("min_box_size", 0)
+
+    items = []
+    for img_obj in images:
+        try:
+            img_data = base64.b64decode(img_obj["base64"])
+            img = Image.open(BytesIO(img_data)).convert("RGB")
+            items.append({"id": img_obj["id"], "image": img})
+        except Exception as e:
+            return JSONResponse(status_code=400, content={"error": f"Error decoding image {img_obj.get('id', '')}: {str(e)}"})
+
+    results = await asyncio.to_thread(
+        process_grounding_dino_detections,
+        items,
+        categories,
+        min_box_size
+    )
+    return JSONResponse(content=results)
+
+@app.post("/generate_presence_maps")
+async def generate_presence_maps_endpoint(request: Request):
+    data = await request.json()  # Espera {"images": [{id, base64}, ...]}
+    items = data["images"]
+
+    def process_all(items):
+        results = []
+        for item in items:
+            presence_map, path = generate_presence_map(item["base64"], image_id=item["id"], method=3)
+            results.append({
+                "id": item["id"],
+                "presence_map": presence_map.tolist(),
+                "image_path": path
+            })
+        return results
+
+    results = await asyncio.to_thread(process_all, items)
+    return JSONResponse(content={"results": results})
+
+@app.post("/find_similar_presence_maps")
+async def find_similar_presence_maps_endpoint(request: Request):
+    data = await request.json()
+    image_id = data["id"]
+    top_k = data.get("top_k", 100)
+    
+    results = await asyncio.to_thread(
+        find_similar_presence_maps_by_id,
+        image_id=image_id,
+        top_k=top_k
+    )
+    return JSONResponse(content={"results": results})
 
 @app.post("/query_segment")
 async def query_segment_endpoint(request: Request):
