@@ -99,8 +99,8 @@ def process_grounding_dino_detections(
                 continue
 
             category_boxes[matched_cat].append([x1, y1, x2, y2])
-            fill_color = tuple(random.randint(0, 255) for _ in range(3)) + (90,)
-            draw.rectangle([x1, y1, x2, y2], outline=fill_color[:3], width=2, fill=fill_color)
+            fill_color = tuple(random.randint(0, 255) for _ in range(3)) + (70,)
+            draw.rectangle([x1, y1, x2, y2], outline=fill_color[:3], width=4, fill=fill_color)
 
         debug_img = Image.alpha_composite(debug_img, overlay).convert("RGB")
         debug_img.save(os.path.join(debug_folder, f"{id_}.jpg"))
