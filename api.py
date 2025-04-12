@@ -14,7 +14,12 @@ from logic_inference import (
     extract_tags_ntlk,
     extract_tags_spacy
 )
-from image_analyzer import (get_image_embeddings_from_base64, generate_presence_map, find_similar_presence_maps_by_id, process_yolo_detections, process_grounding_dino_detections)
+from image_analyzer import (
+    get_image_embeddings_from_base64, 
+    generate_presence_map, 
+    find_similar_presence_maps_by_id, 
+    process_grounding_dino_detections_batched, 
+    process_grounding_dino_detections)
 from query_segment import query_segment, remove_photo_prefix
 
 app = FastAPI()
@@ -61,16 +66,18 @@ async def detect_objects_raw(
         content = await file.read()
         img = Image.open(BytesIO(content)).convert("RGB")
         items.append({"id": id_, "image": img})
-    results = await asyncio.to_thread(process_grounding_dino_detections, items, categories, min_box_size)
+    results = await asyncio.to_thread(process_grounding_dino_detections_batched, items, categories, min_box_size)
     return JSONResponse(content=results)
 
 @app.post("/detect_objects_base64")
 async def detect_objects_base64(request: Request):
-    data = await request.json()  # Espera {"images": [{id, base64}, ...], "categories": [...], "min_box_size": int}
+    data = await request.json()  # Espera {"images": [{id, base64}, ...], "categories": [{string, min_box_size, max_box_area_ratio, merge}, ...]}
 
     images = data.get("images", [])
     categories = data.get("categories", [])
-    min_box_size = data.get("min_box_size", 0)
+
+    if not categories:
+        return JSONResponse(status_code=400, content={"error": "Missing 'categories'"})
 
     items = []
     for img_obj in images:
@@ -79,15 +86,18 @@ async def detect_objects_base64(request: Request):
             img = Image.open(BytesIO(img_data)).convert("RGB")
             items.append({"id": img_obj["id"], "image": img})
         except Exception as e:
-            return JSONResponse(status_code=400, content={"error": f"Error decoding image {img_obj.get('id', '')}: {str(e)}"})
+            return JSONResponse(
+                status_code=400,
+                content={"error": f"Error decoding image {img_obj.get('id', '')}: {str(e)}"}
+            )
 
     results = await asyncio.to_thread(
-        process_grounding_dino_detections,
+        process_grounding_dino_detections_batched,
         items,
-        categories,
-        min_box_size
+        categories
     )
     return JSONResponse(content=results)
+
 
 @app.post("/generate_presence_maps")
 async def generate_presence_maps_endpoint(request: Request):
