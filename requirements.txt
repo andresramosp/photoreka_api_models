@@ -18,3 +18,4 @@ open-clip-torch
 ultralytics
 accelerate
 python-multipart
+runpod
