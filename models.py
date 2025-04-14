@@ -23,8 +23,8 @@ def init_models():
     print("Inicializando modelos comunes...")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    # Usa /workspace/models solo si existe (RunPod); si no, usa default
-    cache_dir = "/workspace/models" if os.path.exists("/workspace") else None
+    # Usa /runpod-volume/models solo si existe (RunPod); si no, usa default
+    cache_dir = "/runpod-volume/models" if os.path.exists("/runpod-volume") else None
 
     embeddings_model = SentenceTransformer(
         'all-mpnet-base-v2',
