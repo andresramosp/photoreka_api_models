@@ -16,3 +16,5 @@ inflect
 cachetools
 open-clip-torch
 ultralytics
+accelerate
+python-multipart
