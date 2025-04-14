@@ -16,10 +16,8 @@ from logic_inference import (
 )
 from image_analyzer import (
     get_image_embeddings_from_base64, 
-    generate_presence_map, 
-    find_similar_line_maps_by_id, 
     process_grounding_dino_detections_batched, 
-    generate_line_map)
+    )
 from query_segment import query_segment, remove_photo_prefix
 
 app = FastAPI()
@@ -98,58 +96,58 @@ async def detect_objects_base64(request: Request):
     )
     return JSONResponse(content=results)
 
-@app.post("/generate_line_maps")
-async def generate_line_maps_endpoint(request: Request):
-    data = await request.json()  # Espera {"images": [{id, base64}, ...]}
-    items = data["images"]
+# @app.post("/generate_line_maps")
+# async def generate_line_maps_endpoint(request: Request):
+#     data = await request.json()  # Espera {"images": [{id, base64}, ...]}
+#     items = data["images"]
 
-    def process_all(items):
-        results = []
-        for item in items:
-            presence_map, path, segments = generate_line_map(item["base64"], image_id=item["id"])
-            segments = [[int(x1), int(y1), int(x2), int(y2)] for x1, y1, x2, y2 in segments]
-            results.append({
-                "id": item["id"],
-                "presence_map": presence_map.tolist(),
-                "image_path": path,
-                "segments": segments
-            })
-        return results
+#     def process_all(items):
+#         results = []
+#         for item in items:
+#             presence_map, path, segments = generate_line_map(item["base64"], image_id=item["id"])
+#             segments = [[int(x1), int(y1), int(x2), int(y2)] for x1, y1, x2, y2 in segments]
+#             results.append({
+#                 "id": item["id"],
+#                 "presence_map": presence_map.tolist(),
+#                 "image_path": path,
+#                 "segments": segments
+#             })
+#         return results
 
-    results = await asyncio.to_thread(process_all, items)
-    return JSONResponse(content={"results": results})
+#     results = await asyncio.to_thread(process_all, items)
+#     return JSONResponse(content={"results": results})
 
-@app.post("/generate_presence_maps")
-async def generate_presence_maps_endpoint(request: Request):
-    data = await request.json()  # Espera {"images": [{id, base64}, ...]}
-    items = data["images"]
+# @app.post("/generate_presence_maps")
+# async def generate_presence_maps_endpoint(request: Request):
+#     data = await request.json()  # Espera {"images": [{id, base64}, ...]}
+#     items = data["images"]
 
-    def process_all(items):
-        results = []
-        for item in items:
-            presence_map, path = generate_presence_map(item["base64"], image_id=item["id"], method=3)
-            results.append({
-                "id": item["id"],
-                "presence_map": presence_map.tolist(),
-                "image_path": path
-            })
-        return results
+#     def process_all(items):
+#         results = []
+#         for item in items:
+#             presence_map, path = generate_presence_map(item["base64"], image_id=item["id"], method=3)
+#             results.append({
+#                 "id": item["id"],
+#                 "presence_map": presence_map.tolist(),
+#                 "image_path": path
+#             })
+#         return results
 
-    results = await asyncio.to_thread(process_all, items)
-    return JSONResponse(content={"results": results})
+#     results = await asyncio.to_thread(process_all, items)
+#     return JSONResponse(content={"results": results})
 
-@app.post("/find_similar_presence_maps")
-async def find_similar_presence_maps_endpoint(request: Request):
-    data = await request.json()
-    image_id = data["id"]
-    top_k = data.get("top_k", 100)
+# @app.post("/find_similar_presence_maps")
+# async def find_similar_presence_maps_endpoint(request: Request):
+#     data = await request.json()
+#     image_id = data["id"]
+#     top_k = data.get("top_k", 100)
     
-    results = await asyncio.to_thread(
-        find_similar_line_maps_by_id,
-        image_id=image_id,
-        top_k=top_k
-    )
-    return JSONResponse(content={"results": results})
+#     results = await asyncio.to_thread(
+#         find_similar_line_maps_by_id,
+#         image_id=image_id,
+#         top_k=top_k
+#     )
+#     return JSONResponse(content={"results": results})
 
 @app.post("/query_segment")
 async def query_segment_endpoint(request: Request):

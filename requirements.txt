@@ -14,5 +14,5 @@ matplotlib
 scipy
 inflect
 cachetools
-onnxruntime
 open-clip-torch
+ultralytics
