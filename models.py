@@ -5,6 +5,7 @@ import spacy
 from cachetools import TTLCache
 import nltk
 from ultralytics import YOLO
+from controlnet_aux import MLSDdetector
 
 # Descargas NLTK (se realizan al importar el módulo)
 nltk.download('punkt', quiet=True)
@@ -38,6 +39,8 @@ def init_models():
     yolo_model = YOLO("yolov8n.pt")
     # print(yolo_model.model.names)
 
+    mlsd_detector = MLSDdetector.from_pretrained('lllyasviel/ControlNet')
+
     return {
         "embeddings_model": embeddings_model,
         "roberta_classifier_text": roberta_classifier_text,
@@ -45,7 +48,8 @@ def init_models():
         "bart_classifier": bart_classifier,
         "nlp": nlp,
         "cache": cache,
-        "yolo_model": yolo_model
+        "yolo_model": yolo_model,
+        "mlsd_model": mlsd_detector,
     }
 
 # Cargar MODELS al momento de la importación
