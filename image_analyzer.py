@@ -1,5 +1,4 @@
 import torch
-import open_clip
 from PIL import Image, ImageDraw
 from io import BytesIO
 import base64
@@ -11,30 +10,11 @@ from uuid import uuid4
 import random
 from models import MODELS
 from torch.amp import autocast
-from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
 from PIL import ImageColor
 
 # Configuración del dispositivo
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-# Cargar modelo CLIP
-model, _, preprocess = open_clip.create_model_and_transforms('ViT-B-32', pretrained='openai')
-model = model.to(device)
-model.eval()
-
-def setup_grounding_dino(device="cuda"):
-    model = AutoModelForZeroShotObjectDetection.from_pretrained(
-        "IDEA-Research/grounding-dino-base"
-    ).to(device)
-
-    # Convertir a FP16 para optimizar rendimiento/memoria
-    model = model.half()
-    model.eval()
-
-    processor = AutoProcessor.from_pretrained("IDEA-Research/grounding-dino-base")
-    return model, processor
-
-gdino_model, gdino_processor = setup_grounding_dino(device)
 
 def resize_image_max_width(image: Image.Image, max_width: int = 1500) -> Image.Image:
     width, height = image.size
@@ -76,13 +56,13 @@ def process_grounding_dino_detections_batched(
                 box_threshold = base_box_threshold + 0.1 * attempt
                 text_threshold = base_text_threshold + 0.1 * attempt
 
-                inputs = gdino_processor(images=image, text=prompt, return_tensors="pt").to(device)
+                inputs = MODELS["gdino_processor"](images=image, text=prompt, return_tensors="pt").to(device)
                 with torch.no_grad():
                     with autocast("cuda", dtype=torch.float16):
-                        outputs = gdino_model(**inputs)
+                        outputs = MODELS["gdino_model"](**inputs)
 
                 target_size = torch.tensor([image.size[::-1]], device=device)
-                detections = gdino_processor.post_process_grounded_object_detection(
+                detections = MODELS["gdino_processor"].post_process_grounded_object_detection(
                     outputs=outputs,
                     input_ids=inputs["input_ids"],
                     target_sizes=target_size,
@@ -166,13 +146,13 @@ def process_grounding_dino_detections(
             box_threshold = base_box_threshold + 0.1 * attempt
             text_threshold = base_text_threshold + 0.1 * attempt
 
-            inputs = gdino_processor(images=image, text=prompt, return_tensors="pt").to(device)
+            inputs = MODELS["gdino_processor"](images=image, text=prompt, return_tensors="pt").to(device)
             with torch.no_grad():
                 with autocast("cuda", dtype=torch.float16):
-                    outputs = gdino_model(**inputs)
+                    outputs =  MODELS["gdino_model"](**inputs)
 
             target_size = torch.tensor([image.size[::-1]], device=device)
-            detections = gdino_processor.post_process_grounded_object_detection(
+            detections =  MODELS["gdino_processor"].post_process_grounded_object_detection(
                 outputs=outputs,
                 input_ids=inputs["input_ids"],
                 target_sizes=target_size,
@@ -274,14 +254,14 @@ def get_image_embeddings_from_base64(items: list[dict]) -> list[dict]:
         ids.append(item["id"])
         image_data = base64.b64decode(item["base64"])
         img = Image.open(BytesIO(image_data)).convert("RGB")
-        img = preprocess(img)
+        img = MODELS["clip_preprocess"](img)
         images.append(img)
 
     # Stack y pasar en batch
     image_batch = torch.stack(images).to(device)
 
     with torch.no_grad():
-        embeddings = model.encode_image(image_batch)
+        embeddings = MODELS["clip_model"].encode_image(image_batch)
         embeddings = embeddings / embeddings.norm(dim=-1, keepdim=True)  # normalización opcional
 
     # Asociar cada embedding con su ID
