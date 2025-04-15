@@ -65,3 +65,6 @@ async def handler(job):
         result = {"error": str(e)}
 
     return result
+
+runpod.serverless.start({"handler": handler})
+
