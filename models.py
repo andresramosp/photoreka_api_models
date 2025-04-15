@@ -1,4 +1,5 @@
 import os
+import time
 import torch
 import spacy
 from cachetools import TTLCache
@@ -148,9 +149,19 @@ def init_models():
 
 # Cargar MODELS al momento de la importación
 MODELS = None
+MAX_RETRIES = 3
 
 def get_models():
     global MODELS
     if MODELS is None:
         MODELS = init_models()
+
+    # Verificar si alguno de los modelos (excluida la cache) es None y reintentar la inicialización
+    retries = 0
+    essential_keys = [key for key in MODELS if key != "cache"]
+    while retries < MAX_RETRIES and any(MODELS.get(key) is None for key in essential_keys):
+        print(f"[WARNING] Algunos modelos no se inicializaron correctamente. Reintentando ({retries + 1}/{MAX_RETRIES})...")
+        MODELS = init_models()
+        retries += 1
+
     return MODELS
