@@ -25,92 +25,126 @@ def init_models():
     print("Inicializando modelos comunes...")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    # Usa /runpod-volume/models solo si existe (RunPod); si no, usa default
     cache_dir = "/runpod-volume/models" if os.path.exists("/runpod-volume") else None
 
-    embeddings_model = SentenceTransformer(
-        'all-mpnet-base-v2',
-        device=device,
-        cache_folder=cache_dir
-    )
+    models = {}
 
-    roberta_classifier_model = AutoModelForSequenceClassification.from_pretrained(
-        "roberta-large-mnli",
-        torch_dtype=torch.bfloat16,
-        device_map="auto",
-        cache_dir=cache_dir
-    )
-    roberta_classifier_tokenizer = AutoTokenizer.from_pretrained(
-        "roberta-large-mnli",
-        use_fast=True,
-        cache_dir=cache_dir
-    )
-    roberta_classifier_text = pipeline(
-        "text-classification",
-        model=roberta_classifier_model,
-        tokenizer=roberta_classifier_tokenizer
-    )
+    # SentenceTransformer
+    try:
+        models["embeddings_model"] = SentenceTransformer(
+            'all-mpnet-base-v2',
+            device=device,
+            cache_folder=cache_dir
+        )
+    except Exception as e:
+        print(f"[ERROR] embeddings_model: {e}")
+        models["embeddings_model"] = None
 
-    # NER con carga manual
-    ner_model_obj = AutoModelForTokenClassification.from_pretrained(
-        "FacebookAI/xlm-roberta-large-finetuned-conll03-english",
-        cache_dir=cache_dir
-    )
-    ner_tokenizer = AutoTokenizer.from_pretrained(
-        "FacebookAI/xlm-roberta-large-finetuned-conll03-english",
-        cache_dir=cache_dir
-    )
-    ner_model = pipeline(
-        "ner",
-        model=ner_model_obj,
-        tokenizer=ner_tokenizer,
-        aggregation_strategy="simple",
-        device=0 if device == "cuda" else -1
-    )
+    # Roberta classifier
+    try:
+        model = AutoModelForSequenceClassification.from_pretrained(
+            "roberta-large-mnli",
+            torch_dtype=torch.bfloat16,
+            device_map="auto",
+            cache_dir=cache_dir
+        )
+        tokenizer = AutoTokenizer.from_pretrained(
+            "roberta-large-mnli",
+            use_fast=True,
+            cache_dir=cache_dir
+        )
+        models["roberta_classifier_text"] = pipeline(
+            "text-classification",
+            model=model,
+            tokenizer=tokenizer
+        )
+    except Exception as e:
+        print(f"[ERROR] roberta_classifier_text: {e}")
+        models["roberta_classifier_text"] = None
 
-    bart_classifier = pipeline(
-        "zero-shot-classification",
-        model="facebook/bart-large-mnli",
-        cache_dir=cache_dir
-    )
+    # NER
+    try:
+        ner_model = AutoModelForTokenClassification.from_pretrained(
+            "FacebookAI/xlm-roberta-large-finetuned-conll03-english",
+            cache_dir=cache_dir
+        )
+        ner_tokenizer = AutoTokenizer.from_pretrained(
+            "FacebookAI/xlm-roberta-large-finetuned-conll03-english",
+            cache_dir=cache_dir
+        )
+        models["ner_model"] = pipeline(
+            "ner",
+            model=ner_model,
+            tokenizer=ner_tokenizer,
+            aggregation_strategy="simple",
+            device=0 if device == "cuda" else -1
+        )
+    except Exception as e:
+        print(f"[ERROR] ner_model: {e}")
+        models["ner_model"] = None
 
-    nlp = spacy.load("en_core_web_sm")
-    cache = TTLCache(maxsize=200000, ttl=3600)
+    # BART classifier
+    try:
+        models["bart_classifier"] = pipeline(
+            "zero-shot-classification",
+            model="facebook/bart-large-mnli",
+            cache_dir=cache_dir
+        )
+    except Exception as e:
+        print(f"[ERROR] bart_classifier: {e}")
+        models["bart_classifier"] = None
 
-    yolo_model = YOLO("yolov8n.pt")  # cache automático
+    # SpaCy
+    try:
+        models["nlp"] = spacy.load("en_core_web_sm")
+    except Exception as e:
+        print(f"[ERROR] spacy: {e}")
+        models["nlp"] = None
 
-    # GroundDino
-    gdino_model = AutoModelForZeroShotObjectDetection.from_pretrained(
-        "IDEA-Research/grounding-dino-base",
-        cache_dir=cache_dir
-    ).to(device)
+    # Cache
+    models["cache"] = TTLCache(maxsize=200000, ttl=3600)
 
-    gdino_model = gdino_model.half()
-    gdino_model.eval()
+    # YOLO
+    try:
+        models["yolo_model"] = YOLO("yolov8n.pt")
+    except Exception as e:
+        print(f"[ERROR] yolo_model: {e}")
+        models["yolo_model"] = None
 
-    gdino_processor = AutoProcessor.from_pretrained(
-        "IDEA-Research/grounding-dino-base",
-        cache_dir=cache_dir
-    )
+    # Grounding DINO
+    try:
+        gdino_model = AutoModelForZeroShotObjectDetection.from_pretrained(
+            "IDEA-Research/grounding-dino-base",
+            cache_dir=cache_dir
+        ).to(device)
+        gdino_model = gdino_model.half()
+        gdino_model.eval()
+        gdino_processor = AutoProcessor.from_pretrained(
+            "IDEA-Research/grounding-dino-base",
+            cache_dir=cache_dir
+        )
+        models["gdino_model"] = gdino_model
+        models["gdino_processor"] = gdino_processor
+    except Exception as e:
+        print(f"[ERROR] grounding_dino: {e}")
+        models["gdino_model"] = None
+        models["gdino_processor"] = None
 
     # CLIP
-    clip_model, _, clip_preprocess = open_clip.create_model_and_transforms('ViT-B-32', pretrained='openai')
-    clip_model = clip_model.to(device)
-    clip_model.eval()
+    try:
+        clip_model, _, clip_preprocess = open_clip.create_model_and_transforms(
+            'ViT-B-32', pretrained='openai'
+        )
+        clip_model = clip_model.to(device)
+        clip_model.eval()
+        models["clip_model"] = clip_model
+        models["clip_preprocess"] = clip_preprocess
+    except Exception as e:
+        print(f"[ERROR] clip_model: {e}")
+        models["clip_model"] = None
+        models["clip_preprocess"] = None
 
-    return {
-        "embeddings_model": embeddings_model,
-        "roberta_classifier_text": roberta_classifier_text,
-        "ner_model": ner_model,
-        "bart_classifier": bart_classifier,
-        "nlp": nlp,
-        "cache": cache,
-        "yolo_model": yolo_model,
-        "gdino_model": gdino_model,
-        "gdino_processor": gdino_processor,
-        "clip_model": clip_model,
-        "clip_preprocess": clip_preprocess
-    }
+    return models
 
 # Cargar MODELS al momento de la importación
 MODELS = None
