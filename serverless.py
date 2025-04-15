@@ -3,6 +3,8 @@ import base64
 from io import BytesIO
 from PIL import Image
 
+from models import ( get_models )
+
 from logic_inference import (
     adjust_tags_proximities_by_context_inference_logic,
     adjust_descs_proximities_by_context_inference_logic,
@@ -20,6 +22,8 @@ from query_segment import query_segment, remove_photo_prefix
 
 
 async def handler(job):
+
+    get_models()
     input_data = job.get("input", {})
     operation = input_data.get("operation")
     data = input_data.get("data", {})

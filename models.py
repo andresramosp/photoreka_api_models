@@ -113,4 +113,10 @@ def init_models():
     }
 
 # Cargar MODELS al momento de la importación
-MODELS = init_models()
+MODELS = None
+
+def get_models():
+    global MODELS
+    if MODELS is None:
+        MODELS = init_models()
+    return MODELS

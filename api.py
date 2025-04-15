@@ -19,6 +19,9 @@ from image_analyzer import (
     process_grounding_dino_detections_batched, 
     )
 from query_segment import query_segment, remove_photo_prefix
+from models import ( get_models )
+
+get_models()
 
 app = FastAPI()
 
