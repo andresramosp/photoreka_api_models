@@ -8,7 +8,7 @@ import os
 from scipy.spatial.distance import euclidean
 from uuid import uuid4
 import random
-from models import MODELS
+import models
 from torch.amp import autocast
 from PIL import ImageColor
 
@@ -56,13 +56,13 @@ def process_grounding_dino_detections_batched(
                 box_threshold = base_box_threshold + 0.1 * attempt
                 text_threshold = base_text_threshold + 0.1 * attempt
 
-                inputs = MODELS["gdino_processor"](images=image, text=prompt, return_tensors="pt").to(device)
+                inputs = models.MODELS["gdino_processor"](images=image, text=prompt, return_tensors="pt").to(device)
                 with torch.no_grad():
                     with autocast("cuda", dtype=torch.float16):
-                        outputs = MODELS["gdino_model"](**inputs)
+                        outputs = models.MODELS["gdino_model"](**inputs)
 
                 target_size = torch.tensor([image.size[::-1]], device=device)
-                detections = MODELS["gdino_processor"].post_process_grounded_object_detection(
+                detections = models.MODELS["gdino_processor"].post_process_grounded_object_detection(
                     outputs=outputs,
                     input_ids=inputs["input_ids"],
                     target_sizes=target_size,
@@ -146,13 +146,13 @@ def process_grounding_dino_detections(
             box_threshold = base_box_threshold + 0.1 * attempt
             text_threshold = base_text_threshold + 0.1 * attempt
 
-            inputs = MODELS["gdino_processor"](images=image, text=prompt, return_tensors="pt").to(device)
+            inputs = models.MODELS["gdino_processor"](images=image, text=prompt, return_tensors="pt").to(device)
             with torch.no_grad():
                 with autocast("cuda", dtype=torch.float16):
-                    outputs =  MODELS["gdino_model"](**inputs)
+                    outputs =  models.MODELS["gdino_model"](**inputs)
 
             target_size = torch.tensor([image.size[::-1]], device=device)
-            detections =  MODELS["gdino_processor"].post_process_grounded_object_detection(
+            detections =  models.MODELS["gdino_processor"].post_process_grounded_object_detection(
                 outputs=outputs,
                 input_ids=inputs["input_ids"],
                 target_sizes=target_size,
@@ -217,7 +217,7 @@ def process_yolo_detections(items: list[dict], categories: list[str], min_box_si
     debug_folder = "debug_yolo"
     os.makedirs(debug_folder, exist_ok=True)
 
-    yolo_model = MODELS["yolo_model"]
+    yolo_model = models.MODELS["yolo_model"]
     
     for item in items:
         id_ = item["id"]
@@ -254,14 +254,14 @@ def get_image_embeddings_from_base64(items: list[dict]) -> list[dict]:
         ids.append(item["id"])
         image_data = base64.b64decode(item["base64"])
         img = Image.open(BytesIO(image_data)).convert("RGB")
-        img = MODELS["clip_preprocess"](img)
+        img = models.MODELS["clip_preprocess"](img)
         images.append(img)
 
     # Stack y pasar en batch
     image_batch = torch.stack(images).to(device)
 
     with torch.no_grad():
-        embeddings = MODELS["clip_model"].encode_image(image_batch)
+        embeddings = models.MODELS["clip_model"].encode_image(image_batch)
         embeddings = embeddings / embeddings.norm(dim=-1, keepdim=True)  # normalización opcional
 
     # Asociar cada embedding con su ID

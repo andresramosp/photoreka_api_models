@@ -5,7 +5,7 @@ import time
 from nltk.corpus import wordnet as wn
 from nltk.stem import WordNetLemmatizer
 from sentence_transformers import util
-from models import MODELS
+import models
 
 lemmatizer = WordNetLemmatizer()
 
@@ -15,7 +15,7 @@ class QueryRequest(BaseModel):
 def remove_photo_prefix(query: str):
     start_time = time.perf_counter()
 
-    embeddings_model = MODELS["embeddings_model"]
+    embeddings_model = models.MODELS["embeddings_model"]
     QUERY_PREFIXES = [
         "I would like to explore pictures of", "I'm looking for an image of", "I want to see images of",
         "I need a photo where", "show me pictures with", "photos capturing the essence of",
@@ -80,12 +80,12 @@ def split_query_with_connectors(query: str):
     return segments
 
 def get_pos_spacy_no_context(word):
-    nlp = MODELS["nlp"]
+    nlp = models.MODELS["nlp"]
     doc = nlp(word)
     return doc[0].pos_ if doc[0].pos_ in ["ADJ", "NOUN", "VERB", "ADV", "ADP"] else "UNKNOWN"
 
 def get_pos_spacy(word: str, sentence: str = None) -> str:
-    nlp = MODELS["nlp"]
+    nlp = models.MODELS["nlp"]
     if sentence:
         doc = nlp(sentence)
         for token in doc:
@@ -128,7 +128,7 @@ def block_predefined(query: str) -> str:
 
 def block_er_entities(query: str, use_model: bool = True) -> str:
     if use_model:
-        ner_model = MODELS["ner_model"]
+        ner_model = models.MODELS["ner_model"]
         entities = ner_model(query)
         for ent in sorted(entities, key=lambda x: x['start'], reverse=True):
             start, end = ent['start'], ent['end']

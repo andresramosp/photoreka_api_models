@@ -5,7 +5,7 @@ from sentence_transformers import util
 import nltk
 import re
 import concurrent.futures
-from models import MODELS
+import models
 
 def remove_leading_articles(text: str) -> str:
     return re.sub(r"^(a|an|the)\s+", "", text, flags=re.IGNORECASE)
@@ -16,7 +16,7 @@ def generate_groups_for_tags(data: dict):
     tags = data.get("tags", [])
     groups = data.get("groups", ['person', 'objects', 'animals', 'places', 'feeling', 'weather', 'symbols', 'concept or idea'])
     candidate_groups = [f"main subject is a {group}" for group in groups]
-    bart_classifier = MODELS["bart_classifier"]
+    bart_classifier = models.MODELS["bart_classifier"]
     
     def process_batch(batch_tags):
         batch_result = {}
@@ -34,7 +34,7 @@ def generate_groups_for_tags(data: dict):
     return [f"{tag} | {group}" for tag, group in final_results.items()]
 
 def extract_tags_spacy(text: str, allowed_groups: list):
-    nlp = MODELS["nlp"]
+    nlp = models.MODELS["nlp"]
     doc = nlp(text)
     tags = {ent.text for ent in doc.ents}
     tags |= {chunk.text for chunk in doc.noun_chunks}
@@ -96,8 +96,8 @@ def combine_tag_name_with_group(tag):
     return tag["name"]
 
 def cached_inference(batch_queries, batch_size):
-    cache = MODELS["cache"]
-    roberta_classifier_text = MODELS["roberta_classifier_text"]
+    cache = models.MODELS["cache"]
+    roberta_classifier_text = models.MODELS["roberta_classifier_text"]
     cached_results = []
     queries_to_infer = []
     indexes_to_infer = []
@@ -182,7 +182,7 @@ def get_embeddings_logic(data: dict):
     tags = data.get("tags", [])
     if not tags or not isinstance(tags, list):
         raise ValueError("Field 'tags' must be a list.")
-    embeddings_model = MODELS["embeddings_model"]
+    embeddings_model = models.MODELS["embeddings_model"]
     with torch.inference_mode():
         embeddings_tensor = embeddings_model.encode(tags, batch_size=16, convert_to_tensor=True)
     embeddings = embeddings_tensor.cpu().tolist()

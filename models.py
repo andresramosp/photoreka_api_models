@@ -152,7 +152,7 @@ MODELS = None
 MAX_RETRIES = 3
 
 def get_models():
-    global MODELS
+    global MODELS  
     if MODELS is None:
         MODELS = init_models()
 
@@ -163,5 +163,3 @@ def get_models():
         print(f"[WARNING] Algunos modelos no se inicializaron correctamente. Reintentando ({retries + 1}/{MAX_RETRIES})...")
         MODELS = init_models()
         retries += 1
-
-    return MODELS
