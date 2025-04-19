@@ -1,9 +1,10 @@
 import runpod
+import asyncio
 import base64
 from io import BytesIO
 from PIL import Image
 
-from models import ( get_models )
+from models import get_models
 
 from logic_inference import (
     adjust_tags_proximities_by_context_inference_logic,
@@ -22,7 +23,6 @@ from query_segment import query_segment, remove_photo_prefix
 
 
 async def handler(job):
-
     input_data = job.get("input", {})
     operation = input_data.get("operation")
     data = input_data.get("data", {})
@@ -31,33 +31,48 @@ async def handler(job):
         return {"error": "Missing 'operation' in input"}
 
     try:
-        # Iniciar modelos siempre, incluso en el ping
+        # Los modelos solo se cargan la primera vez
         get_models()
 
         if operation == "ping":
             return {"status": "warmed up"}
 
         if operation == "adjust_tags_proximities_by_context_inference":
-            result = adjust_tags_proximities_by_context_inference_logic(data)
+            result = await asyncio.to_thread(
+                adjust_tags_proximities_by_context_inference_logic, data
+            )
         elif operation == "adjust_descs_proximities_by_context_inference":
-            result = adjust_descs_proximities_by_context_inference_logic(data)
+            result = await asyncio.to_thread(
+                adjust_descs_proximities_by_context_inference_logic, data
+            )
         elif operation == "get_embeddings":
-            result = get_embeddings_logic(data)
+            result = await asyncio.to_thread(get_embeddings_logic, data)
         elif operation == "get_embeddings_image":
-            result = get_image_embeddings_from_base64(data.get("images", []))
+            result = await asyncio.to_thread(
+                get_image_embeddings_from_base64, data.get("images", [])
+            )
         elif operation == "detect_objects_base64":
             items = []
             for img_obj in data.get("images", []):
                 img_data = base64.b64decode(img_obj["base64"])
                 img = Image.open(BytesIO(img_data)).convert("RGB")
                 items.append({"id": img_obj["id"], "image": img})
-            result = process_grounding_dino_detections_batched(items, data.get("categories", []))
+
+            result = await asyncio.to_thread(
+                process_grounding_dino_detections_batched,
+                items,
+                data.get("categories", []),
+            )
         elif operation == "query_segment":
-            result = query_segment(data.get("query", ""))
+            result = await asyncio.to_thread(
+                query_segment, data.get("query", "")
+            )
         elif operation == "query_no_prefix":
-            result = remove_photo_prefix(data.get("query", ""))
+            result = await asyncio.to_thread(
+                remove_photo_prefix, data.get("query", "")
+            )
         elif operation == "clean_texts":
-            result = clean_texts(data)
+            result = await asyncio.to_thread(clean_texts, data)
         else:
             result = {"error": f"Unsupported operation: {operation}"}
     except Exception as e:
@@ -65,5 +80,11 @@ async def handler(job):
 
     return result
 
-runpod.serverless.start({"handler": handler})
 
+#  Permite hasta 4 peticiones simultáneas por worker.
+runpod.serverless.start(
+    {
+        "handler": handler,
+        "concurrency_modifier": (lambda current: 4),
+    }
+)

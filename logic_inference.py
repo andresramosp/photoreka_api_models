@@ -186,7 +186,7 @@ def get_embeddings_logic(data: dict):
     with torch.inference_mode():
         embeddings_tensor = embeddings_model.encode(tags, batch_size=16, convert_to_tensor=True)
     embeddings = embeddings_tensor.cpu().tolist()
-    # print(f"⏳ [Get Embeddings] Tiempo de ejecución: {time.perf_counter() - start_time:.4f} segundos")
+    print(f"⏳ [Get Embeddings] Tiempo de ejecución: {time.perf_counter() - start_time:.4f} segundos")
 
     return {"tags": tags, "embeddings": embeddings}
 
