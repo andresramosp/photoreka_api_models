@@ -23,7 +23,6 @@ from query_segment import query_segment, remove_photo_prefix
 
 async def handler(job):
 
-    get_models()
     input_data = job.get("input", {})
     operation = input_data.get("operation")
     data = input_data.get("data", {})
@@ -32,6 +31,12 @@ async def handler(job):
         return {"error": "Missing 'operation' in input"}
 
     try:
+        # Iniciar modelos siempre, incluso en el ping
+        get_models()
+
+        if operation == "ping":
+            return {"status": "warmed up"}
+
         if operation == "adjust_tags_proximities_by_context_inference":
             result = adjust_tags_proximities_by_context_inference_logic(data)
         elif operation == "adjust_descs_proximities_by_context_inference":
@@ -53,16 +58,6 @@ async def handler(job):
             result = remove_photo_prefix(data.get("query", ""))
         elif operation == "clean_texts":
             result = clean_texts(data)
-        # elif operation == "generate_groups_for_tags":
-        #     result = generate_groups_for_tags(data)
-        # elif operation == "extract_tags":
-        #     method = data.get("method", "spacy")
-        #     if method == "spacy":
-        #         result = extract_tags_spacy(data.get("text", ""), data.get("allowed_groups", []))
-        #     elif method == "ntlk":
-        #         result = extract_tags_ntlk(data.get("text", ""))
-        #     else:
-        #         result = {"error": "Unsupported method"}
         else:
             result = {"error": f"Unsupported operation: {operation}"}
     except Exception as e:
