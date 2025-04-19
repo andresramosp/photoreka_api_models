@@ -14,5 +14,6 @@ RUN python -m nltk.downloader punkt averaged_perceptron_tagger punkt_tab average
 # Descargar modelo spaCy
 RUN python -m spacy download en_core_web_sm
 
+
 # Comando final: ejecutar handler serverless
 CMD ["python", "serverless_logic.py"]
