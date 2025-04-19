@@ -1,0 +1,12 @@
+FROM python:3.10
+
+RUN apt-get update && apt-get install -y libgl1
+
+WORKDIR /app
+COPY . /app
+
+# Instalar dependencias
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Comando final: ejecutar handler serverless
+CMD ["python", "serverless_logic.py"]
