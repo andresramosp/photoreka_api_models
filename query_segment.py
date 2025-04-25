@@ -27,7 +27,7 @@ def remove_photo_prefix(query: str):
         "images similar to", "photos similar to", "photos resembling", "photos in", "images of",
         "pictures of", "photos of", "an image with", "a photo that shows", "photos for an article",
         "photos for a blog post", "photos for a mood board", "pictures for a creative project",
-        "images for social media", "stock photos of", "professional photos of", "aesthetic pictures of"
+        "images for social media", "stock photos of", "professional photos of", "aesthetic pictures of", "a scene of", "a scene resembling"
     ]
     QUERY_PREFIXES = sorted(QUERY_PREFIXES, key=len, reverse=True)
     PREFIX_EMBEDDINGS = embeddings_model.encode(QUERY_PREFIXES, convert_to_tensor=True)
