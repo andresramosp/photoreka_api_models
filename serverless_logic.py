@@ -17,7 +17,7 @@ get_models(
         # "bart_classifier",
         "nlp",
         "ner_model",
-        "embeddings_model"
+        # "embeddings_model"
     ],
     load_nltk=True
 )
@@ -44,15 +44,15 @@ async def handler(job):
                 adjust_descs_proximities_by_context_inference_logic, data
             )
 
-        elif operation == "query_segment":
-            result = await asyncio.to_thread(
-                query_segment, data.get("query", "")
-            )
+        # elif operation == "query_segment":
+        #     result = await asyncio.to_thread(
+        #         query_segment, data.get("query", "")
+        #     )
 
-        elif operation == "query_no_prefix":
-            result = await asyncio.to_thread(
-                remove_photo_prefix, data.get("query", "")
-            )
+        # elif operation == "query_no_prefix":
+        #     result = await asyncio.to_thread(
+        #         remove_photo_prefix, data.get("query", "")
+        #     )
 
         elif operation == "clean_texts":
             result = await asyncio.to_thread(clean_texts, data)

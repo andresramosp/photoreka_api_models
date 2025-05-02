@@ -177,18 +177,18 @@ def adjust_descs_proximities_by_context_inference_logic(data: dict):
     torch.cuda.empty_cache()
     return results
 
-def get_embeddings_logic(data: dict):
-    start_time = time.perf_counter()
-    tags = data.get("tags", [])
-    if not tags or not isinstance(tags, list):
-        raise ValueError("Field 'tags' must be a list.")
-    embeddings_model = models.MODELS["embeddings_model"]
-    with torch.inference_mode():
-        embeddings_tensor = embeddings_model.encode(tags, batch_size=16, convert_to_tensor=True)
-    embeddings = embeddings_tensor.cpu().tolist()
-    print(f"⏳ [Get Embeddings] Tiempo de ejecución: {time.perf_counter() - start_time:.4f} segundos")
+# def get_embeddings_logic(data: dict):
+#     start_time = time.perf_counter()
+#     tags = data.get("tags", [])
+#     if not tags or not isinstance(tags, list):
+#         raise ValueError("Field 'tags' must be a list.")
+#     embeddings_model = models.MODELS["embeddings_model"]
+#     with torch.inference_mode():
+#         embeddings_tensor = embeddings_model.encode(tags, batch_size=16, convert_to_tensor=True)
+#     embeddings = embeddings_tensor.cpu().tolist()
+#     print(f"⏳ [Get Embeddings] Tiempo de ejecución: {time.perf_counter() - start_time:.4f} segundos")
 
-    return {"tags": tags, "embeddings": embeddings}
+#     return {"tags": tags, "embeddings": embeddings}
 
 def purge_text(text: str, purge_list: list) -> str:
     for candidate in purge_list:
