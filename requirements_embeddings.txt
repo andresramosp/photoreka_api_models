@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+torch
+sentence-transformers
+accelerate
+python-multipart
+runpod

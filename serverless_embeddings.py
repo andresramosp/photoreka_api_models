@@ -28,7 +28,7 @@ async def handler(job):
         if operation == "ping":
             return {"status": "warmed up"}
 
-        elif operation == "get_emebddings":
+        elif operation == "get_embeddings":
             result = await asyncio.to_thread(
                 get_embeddings_logic, data
             )

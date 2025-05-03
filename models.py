@@ -29,7 +29,7 @@ def init_models(only=None, load_nltk=True):
         try:
             from sentence_transformers import SentenceTransformer
             models["embeddings_model"] = SentenceTransformer(
-                'all-mpnet-base-v2',
+                'all-MiniLM-L6-v2', #//'all-mpnet-base-v2',
                 device=device,
                 cache_folder=cache_dir
             )
