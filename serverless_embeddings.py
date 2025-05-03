@@ -30,7 +30,7 @@ def handler(job):
     # Ping check
     if operation == "ping":
         print("[HANDLER] Ping operation detected. Responding with warmed up.", flush=True)
-        return {"status": "warmed up"}
+        return {"status": "Hello from CPU"}
 
     # Main logic
     try:
