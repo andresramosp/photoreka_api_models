@@ -6,14 +6,13 @@ from models import get_models
 from logic_inference import (
     get_embeddings_logic
 )
-from query_segment import query_segment, remove_photo_prefix
 
 # Cargar modelos necesarios para NLP y proximidad, excluyendo CLIP y Grounding DINO
 get_models(
     only=[
         "embeddings_model"
     ],
-    load_nltk=True
+    load_nltk=False
 )
 
 async def handler(job):
@@ -23,13 +22,14 @@ async def handler(job):
 
     if not operation:
         return {"error": "Missing 'operation' in input"}
+    
+    print(operation)
 
     try:
         if operation == "ping":
             return {"status": "warmed up"}
 
-        elif operation == "get_embeddings":
-            result = await asyncio.to_thread(
+        result = await asyncio.to_thread(
                 get_embeddings_logic, data
             )
 
