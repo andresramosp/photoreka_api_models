@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request, UploadFile, File, Form
 from logic_inference import (
     adjust_tags_proximities_by_context_inference_logic,
     adjust_descs_proximities_by_context_inference_logic,
-    # get_embeddings_logic,
+    get_embeddings_logic,
     clean_texts,
     generate_groups_for_tags,
     extract_tags_ntlk,
@@ -37,11 +37,11 @@ async def adjust_descs_endpoint(request: Request):
     results = await asyncio.to_thread(adjust_descs_proximities_by_context_inference_logic, data)
     return JSONResponse(content=results)
 
-# @app.post("/get_embeddings")
-# async def get_embeddings_endpoint(request: Request):
-#     data = await request.json()
-#     results = await asyncio.to_thread(get_embeddings_logic, data)
-#     return JSONResponse(content=results)
+@app.post("/get_embeddings")
+async def get_embeddings_endpoint(request: Request):
+    data = await request.json()
+    results = await asyncio.to_thread(get_embeddings_logic, data)
+    return JSONResponse(content=results)
 
 @app.post("/get_embeddings_image")
 async def get_embeddings_image_endpoint(request: Request):
