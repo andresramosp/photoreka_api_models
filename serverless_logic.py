@@ -15,8 +15,8 @@ get_models(
     only=[
         "roberta_classifier_text",
         # "bart_classifier",
-        "nlp",
-        "ner_model",
+        # "nlp",
+        # "ner_model",
         # "embeddings_model"
     ],
     load_nltk=True
