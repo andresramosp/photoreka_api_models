@@ -6,3 +6,5 @@ accelerate
 python-multipart
 runpod
 cachetools
+datasets
+matplotlib
