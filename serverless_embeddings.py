@@ -1,7 +1,7 @@
 import runpod
 
 from models import get_models
-from logic_inference import get_embeddings_logic
+from embeddings import get_embeddings_logic
 
 # ====== Initialization ======
 print("[INIT] Starting model loading...", flush=True)
