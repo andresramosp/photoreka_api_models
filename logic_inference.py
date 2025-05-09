@@ -178,7 +178,6 @@ def adjust_descs_proximities_by_context_inference_logic(data: dict):
     return results
 
 def get_embeddings_logic(data: dict):
-    print("ENTRA EN EL PUTO METODO")
     start_time = time.perf_counter()
     tags = data.get("tags", [])
     if not tags or not isinstance(tags, list):

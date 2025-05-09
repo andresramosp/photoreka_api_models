@@ -4,7 +4,7 @@ torch
 sentence-transformers
 accelerate
 python-multipart
-runpod
+runpod~=1.7.7
 cachetools
 datasets
 matplotlib
