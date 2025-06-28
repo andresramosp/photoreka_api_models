@@ -1,10 +1,14 @@
 FROM python:3.10-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libgl1 \
-    libglib2.0-0 \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+RUN apt-get install -y --no-install-recommends \
+    build-essential \       # Para instalar wheels que requieran compilación
+    libgl1 \                 # Para OpenCV
+    libglib2.0-0 \           # Para OpenCV (gthread)
+    ca-certificates \        # Para conexiones HTTPS seguras
+    libstdc++6 \             # Para compatibilidad con C++ (necesario para muchas wheels)
+    libopenblas-dev \        # Para numpy / operaciones matriciales eficientes
+    libgomp1 \               # Runtime OpenMP (paralelización de transformers y numpy)
+    git                      # Algunas dependencias de transformers se instalan desde repositorios
 
 WORKDIR /app
 COPY . /app
