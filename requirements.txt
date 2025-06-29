@@ -8,6 +8,7 @@ sentence-transformers
 datasets
 nltk
 spacy
+colorthief
 Pillow
 opencv-python-headless
 matplotlib
