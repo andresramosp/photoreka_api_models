@@ -8,11 +8,12 @@ from models import get_models
 from image_analyzer import (
     get_image_embeddings_from_base64,
     process_grounding_dino_detections_batched,
+    get_color_embeddings_from_base64
 )
 
 # Inicializa solo los modelos necesarios
 get_models(
-    only=["clip_model", "clip_preprocess", "gdino_model", "gdino_processor"],
+    only=["clip_model", "clip_preprocess"],
     load_nltk=False
 )
 
@@ -31,6 +32,10 @@ async def handler(job):
         if operation == "get_embeddings_image":
             result = await asyncio.to_thread(
                 get_image_embeddings_from_base64, data.get("images", [])
+            )
+        elif operation == "get_color_embeddings_image":
+            result = await asyncio.to_thread(
+                get_color_embeddings_from_base64, data.get("images", [])
             )
 
         elif operation == "detect_objects_base64":

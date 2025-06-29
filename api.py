@@ -16,6 +16,7 @@ from logic_inference import (
 )
 from image_analyzer import (
     get_image_embeddings_from_base64, 
+    get_color_embeddings_from_base64,
     process_grounding_dino_detections_batched, 
     )
 # from query_segment import query_segment, remove_photo_prefix
@@ -48,6 +49,13 @@ async def get_embeddings_image_endpoint(request: Request):
     data = await request.json()  # Espera {"images": [{id, base64}, ...]}
     items = data["images"]
     results = await asyncio.to_thread(get_image_embeddings_from_base64, items)
+    return JSONResponse(content=results)
+
+@app.post("/get_color_embeddings_image")
+async def get_color_embeddings_image_endpoint(request: Request):
+    data = await request.json()  # Espera {"images": [{id, base64}, ...]}
+    items = data["images"]
+    results = await asyncio.to_thread(get_color_embeddings_from_base64, items)
     return JSONResponse(content=results)
 
 @app.post("/detect_objects_raw")

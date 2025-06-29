@@ -11,6 +11,10 @@ import random
 import models
 from torch.amp import autocast
 from PIL import ImageColor
+import base64
+from io import BytesIO
+from colorthief import ColorThief
+from PIL import Image
 
 # Configuración del dispositivo
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -272,4 +276,31 @@ def get_image_embeddings_from_base64(items: list[dict]) -> list[dict]:
     return results
 
 
+def get_color_embeddings_from_base64(items: list[dict]) -> list[dict]:
+    images = []
+    ids = []
 
+    for item in items:
+        ids.append(item["id"])
+        image_data = base64.b64decode(item["base64"])
+        img = Image.open(BytesIO(image_data)).convert("RGB")
+        images.append(img)
+
+    results = []
+
+    for idx, img in zip(ids, images):
+        img_bytes = BytesIO()
+        img.save(img_bytes, format="JPEG")
+        img_bytes.seek(0)
+
+        color_thief = ColorThief(img_bytes)
+        palette = color_thief.get_palette(color_count=5)
+
+        # Normalizamos a [0,1] y aplanamos
+        flattened_palette = []
+        for color in palette:
+            flattened_palette.extend([c / 255 for c in color])
+
+        results.append({"id": idx, "embedding": flattened_palette})
+
+    return results

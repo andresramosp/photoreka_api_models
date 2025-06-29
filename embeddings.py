@@ -3,7 +3,6 @@ import torch
 import models
 
 def get_embeddings_logic(data: dict):
-    print("ENTRA EN EL PUTO METODO")
     start_time = time.perf_counter()
     tags = data.get("tags", [])
     if not tags or not isinstance(tags, list):
