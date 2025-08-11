@@ -24,7 +24,17 @@ from image_analyzer import (
 # from query_segment import query_segment, remove_photo_prefix
 from models import ( get_models )
 
-get_models()
+get_models(
+    only=[
+        "roberta_classifier_text",
+        # "modern_ce_classifier",
+        # "bart_classifier",
+        # "nlp",
+        # "ner_model",
+        # "embeddings_model"
+    ],
+    load_nltk=True
+)
 
 app = FastAPI()
 

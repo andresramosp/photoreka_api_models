@@ -110,8 +110,10 @@ def cached_inference(batch_queries, batch_size):
 
     if queries_to_infer:
         dataset = Dataset.from_dict({"query": queries_to_infer})
+        # Ensure input is a list of strings
+        queries = list(dataset["query"])
         with torch.inference_mode():
-            batch_results = roberta_classifier_text(dataset["query"], batch_size=batch_size)
+            batch_results = roberta_classifier_text(queries, batch_size=batch_size)
         for i, result in zip(indexes_to_infer, batch_results):
             cache[batch_queries[i]] = result
             cached_results.insert(i, result)
