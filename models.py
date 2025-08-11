@@ -98,6 +98,19 @@ def init_models(only=None, load_nltk=True):
             print(f"[ERROR] bart_classifier: {e}")
             models["bart_classifier"] = None
 
+    if should_load("modern_ce_classifier"):
+        try:
+            from sentence_transformers import CrossEncoder
+            models["modern_ce_classifier"] = CrossEncoder(
+                "dleemiller/ModernCE-large-nli",
+                device=device,
+                cache_folder=cache_dir
+            )
+            print("[OK] modern_ce_classifier cargado.")
+        except Exception as e:
+            print(f"[ERROR] modern_ce_classifier: {e}")
+            models["modern_ce_classifier"] = None
+
     if should_load("nlp"):
         try:
             import spacy

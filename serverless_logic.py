@@ -6,6 +6,8 @@ from models import get_models
 from logic_inference import (
     adjust_tags_proximities_by_context_inference_logic,
     adjust_descs_proximities_by_context_inference_logic,
+    adjust_tags_proximities_by_context_inference_logic_modern,
+    adjust_descs_proximities_by_context_inference_logic_modern,
     clean_texts
 )
 from query_segment import query_segment, remove_photo_prefix
@@ -14,6 +16,7 @@ from query_segment import query_segment, remove_photo_prefix
 get_models(
     only=[
         "roberta_classifier_text",
+        "modern_ce_classifier",
         # "bart_classifier",
         # "nlp",
         # "ner_model",
@@ -42,6 +45,16 @@ async def handler(job):
         elif operation == "adjust_descs_proximities_by_context_inference":
             result = await asyncio.to_thread(
                 adjust_descs_proximities_by_context_inference_logic, data
+            )
+
+        elif operation == "adjust_tags_proximities_by_context_inference_modern":
+            result = await asyncio.to_thread(
+                adjust_tags_proximities_by_context_inference_logic_modern, data
+            )
+
+        elif operation == "adjust_descs_proximities_by_context_inference_modern":
+            result = await asyncio.to_thread(
+                adjust_descs_proximities_by_context_inference_logic_modern, data
             )
 
         # elif operation == "query_segment":
