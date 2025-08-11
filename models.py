@@ -101,11 +101,7 @@ def init_models(only=None, load_nltk=True):
     if should_load("modern_ce_classifier"):
         try:
             from sentence_transformers import CrossEncoder
-            models["modern_ce_classifier"] = CrossEncoder(
-                "dleemiller/ModernCE-large-nli",
-                device=device,
-                cache_folder=cache_dir
-            )
+            models["modern_ce_classifier"] =  CrossEncoder("dleemiller/ModernCE-large-nli")
             print("[OK] modern_ce_classifier cargado.")
         except Exception as e:
             print(f"[ERROR] modern_ce_classifier: {e}")

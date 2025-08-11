@@ -1,8 +1,6 @@
 import time
 import torch
-import numpy as np
 from datasets import Dataset
-from sentence_transformers import util
 import nltk
 import re
 import concurrent.futures
