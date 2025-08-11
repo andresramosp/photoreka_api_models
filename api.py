@@ -8,8 +8,8 @@ from fastapi import FastAPI, Request, UploadFile, File, Form
 from logic_inference import (
     adjust_tags_proximities_by_context_inference_logic,
     adjust_descs_proximities_by_context_inference_logic,
-    adjust_tags_proximities_by_context_inference_logic_modern,
-    adjust_descs_proximities_by_context_inference_logic_modern,
+    # adjust_tags_proximities_by_context_inference_logic_modern,
+    # adjust_descs_proximities_by_context_inference_logic_modern,
     get_embeddings_logic,
     clean_texts,
     generate_groups_for_tags,
@@ -40,17 +40,17 @@ async def adjust_descs_endpoint(request: Request):
     results = await asyncio.to_thread(adjust_descs_proximities_by_context_inference_logic, data)
     return JSONResponse(content=results)
 
-@app.post("/adjust_tags_proximities_by_context_inference_modern")
-async def adjust_tags_endpoint_modern(request: Request):
-    data = await request.json()
-    results = await asyncio.to_thread(adjust_tags_proximities_by_context_inference_logic_modern, data)
-    return JSONResponse(content=results)
+# @app.post("/adjust_tags_proximities_by_context_inference_modern")
+# async def adjust_tags_endpoint_modern(request: Request):
+#     data = await request.json()
+#     results = await asyncio.to_thread(adjust_tags_proximities_by_context_inference_logic_modern, data)
+#     return JSONResponse(content=results)
 
-@app.post("/adjust_descs_proximities_by_context_inference_modern")
-async def adjust_descs_endpoint_modern(request: Request):
-    data = await request.json()
-    results = await asyncio.to_thread(adjust_descs_proximities_by_context_inference_logic_modern, data)
-    return JSONResponse(content=results)
+# @app.post("/adjust_descs_proximities_by_context_inference_modern")
+# async def adjust_descs_endpoint_modern(request: Request):
+#     data = await request.json()
+#     results = await asyncio.to_thread(adjust_descs_proximities_by_context_inference_logic_modern, data)
+#     return JSONResponse(content=results)
 
 @app.post("/get_embeddings")
 async def get_embeddings_endpoint(request: Request):

@@ -1,6 +1,7 @@
 import time
 import torch
 from datasets import Dataset
+from sentence_transformers import util
 import nltk
 import re
 import concurrent.futures
@@ -142,64 +143,6 @@ def adjust_tags_proximities_by_context_inference_logic(data: dict):
     torch.cuda.empty_cache()
     return results
 
-def adjust_tags_proximities_by_context_inference_logic_modern(data: dict):
-    start_time = time.perf_counter()
-    BATCH_SIZE = 128
-    term = preprocess_text(data.get("term", ""), True)
-    tag_list = data.get("tag_list", [])
-    premise = data.get("premise_wrapper", "the photo featured {term}")
-    hypothesis = data.get("hypothesis_wrapper", "the photo featured {term}")
-    if not term or not tag_list:
-        raise ValueError("Missing required fields (term, tag_list)")
-    
-    batch_queries = [
-        (premise.format(term=preprocess_text(combine_tag_name_with_group(tag))), 
-         hypothesis.format(term=term))
-        for tag in tag_list
-    ]
-    tag_names = [tag['name'] for tag in tag_list]
-    
-    modern_ce_classifier = models.MODELS["modern_ce_classifier"]
-    
-    # Process in batches
-    results = {}
-    for i in range(0, len(batch_queries), BATCH_SIZE):
-        batch = batch_queries[i:i+BATCH_SIZE]
-        batch_names = tag_names[i:i+BATCH_SIZE]
-        
-        with torch.inference_mode():
-            scores = modern_ce_classifier.predict(batch)
-        
-        # Convert scores to labels - ModernCE outputs scores for [contradiction, entailment, neutral]
-        label_mapping = ['contradiction', 'entailment', 'neutral']
-        
-        for tag_name, score_array in zip(batch_names, scores):
-            predicted_label_idx = score_array.argmax()
-            label = label_mapping[predicted_label_idx]
-            confidence = score_array[predicted_label_idx]
-            
-            if label == "entailment":
-                adjusted = 1 + confidence
-            elif label == "neutral":
-                adjusted = confidence
-            else:  # contradiction
-                adjusted = -confidence
-                
-            results[tag_name] = {
-                "adjusted_proximity": adjusted, 
-                "label": label, 
-                "score": float(confidence),
-                "all_scores": {
-                    "contradiction": float(score_array[0]),
-                    "entailment": float(score_array[1]),
-                    "neutral": float(score_array[2])
-                }
-            }
-    
-    print(f"⏳ [Adjust Tags Proximities Modern - {term}] Tiempo de ejecución para {len(batch_queries)}: {time.perf_counter() - start_time:.4f} segundos")
-    torch.cuda.empty_cache()
-    return results
-
 def adjust_descs_proximities_by_context_inference_logic(data: dict):
     start_time = time.perf_counter()
 
@@ -234,63 +177,6 @@ def adjust_descs_proximities_by_context_inference_logic(data: dict):
     torch.cuda.empty_cache()
     return results
 
-def adjust_descs_proximities_by_context_inference_logic_modern(data: dict):
-    start_time = time.perf_counter()
-    BATCH_SIZE = 128
-    term = preprocess_text(data.get("term", ""), True)
-    chunk_list = data.get("tag_list", [])
-    premise = data.get("premise_wrapper", "the photo has the following fragment in its description: '{term}'")
-    hypothesis = data.get("hypothesis_wrapper", "the photo features {term}")
-    if not term or not chunk_list:
-        raise ValueError("Missing required fields (term, tag_list)")
-    
-    batch_queries = [
-        (premise.format(term=chunk['name']), hypothesis.format(term=term))
-        for chunk in chunk_list
-    ]
-    chunk_names = [chunk['name'] for chunk in chunk_list]
-    
-    modern_ce_classifier = models.MODELS["modern_ce_classifier"]
-    
-    # Process in batches
-    results = {}
-    for i in range(0, len(batch_queries), BATCH_SIZE):
-        batch = batch_queries[i:i+BATCH_SIZE]
-        batch_names = chunk_names[i:i+BATCH_SIZE]
-        
-        with torch.inference_mode():
-            scores = modern_ce_classifier.predict(batch)
-        
-        # Convert scores to labels - ModernCE outputs scores for [contradiction, entailment, neutral]
-        label_mapping = ['contradiction', 'entailment', 'neutral']
-        
-        for chunk_name, score_array in zip(batch_names, scores):
-            predicted_label_idx = score_array.argmax()
-            label = label_mapping[predicted_label_idx]
-            confidence = score_array[predicted_label_idx]
-            
-            if label == "entailment":
-                adjusted = 1 + confidence
-            elif label == "neutral":
-                adjusted = confidence
-            else:  # contradiction
-                adjusted = -confidence
-                
-            results[chunk_name] = {
-                "adjusted_proximity": adjusted, 
-                "label": label, 
-                "score": float(confidence),
-                "all_scores": {
-                    "contradiction": float(score_array[0]),
-                    "entailment": float(score_array[1]),
-                    "neutral": float(score_array[2])
-                }
-            }
-    
-    print(f"⏳ [Adjust Descs Proximities Modern - {term}] Tiempo de ejecución para {len(batch_queries)}: {time.perf_counter() - start_time:.4f} segundos")
-    torch.cuda.empty_cache()
-    return results
-
 def get_embeddings_logic(data: dict):
     start_time = time.perf_counter()
     tags = data.get("tags", [])
@@ -314,3 +200,118 @@ def clean_texts(data: dict) -> list:
     purge_list = data.get("purge_list")
     with concurrent.futures.ThreadPoolExecutor() as executor:
         return list(executor.map(lambda s: purge_text(s, purge_list), texts))
+    
+# def adjust_tags_proximities_by_context_inference_logic_modern(data: dict):
+#     start_time = time.perf_counter()
+#     BATCH_SIZE = 128
+#     term = preprocess_text(data.get("term", ""), True)
+#     tag_list = data.get("tag_list", [])
+#     premise = data.get("premise_wrapper", "the photo featured {term}")
+#     hypothesis = data.get("hypothesis_wrapper", "the photo featured {term}")
+#     if not term or not tag_list:
+#         raise ValueError("Missing required fields (term, tag_list)")
+    
+#     batch_queries = [
+#         (premise.format(term=preprocess_text(combine_tag_name_with_group(tag))), 
+#          hypothesis.format(term=term))
+#         for tag in tag_list
+#     ]
+#     tag_names = [tag['name'] for tag in tag_list]
+    
+#     modern_ce_classifier = models.MODELS["modern_ce_classifier"]
+    
+#     # Process in batches
+#     results = {}
+#     for i in range(0, len(batch_queries), BATCH_SIZE):
+#         batch = batch_queries[i:i+BATCH_SIZE]
+#         batch_names = tag_names[i:i+BATCH_SIZE]
+        
+#         with torch.inference_mode():
+#             scores = modern_ce_classifier.predict(batch)
+        
+#         # Convert scores to labels - ModernCE outputs scores for [contradiction, entailment, neutral]
+#         label_mapping = ['contradiction', 'entailment', 'neutral']
+        
+#         for tag_name, score_array in zip(batch_names, scores):
+#             predicted_label_idx = score_array.argmax()
+#             label = label_mapping[predicted_label_idx]
+#             confidence = score_array[predicted_label_idx]
+            
+#             if label == "entailment":
+#                 adjusted = 1 + confidence
+#             elif label == "neutral":
+#                 adjusted = confidence
+#             else:  # contradiction
+#                 adjusted = -confidence
+                
+#             results[tag_name] = {
+#                 "adjusted_proximity": adjusted, 
+#                 "label": label, 
+#                 "score": float(confidence),
+#                 "all_scores": {
+#                     "contradiction": float(score_array[0]),
+#                     "entailment": float(score_array[1]),
+#                     "neutral": float(score_array[2])
+#                 }
+#             }
+    
+#     print(f"⏳ [Adjust Tags Proximities Modern - {term}] Tiempo de ejecución para {len(batch_queries)}: {time.perf_counter() - start_time:.4f} segundos")
+#     torch.cuda.empty_cache()
+#     return results
+
+# def adjust_descs_proximities_by_context_inference_logic_modern(data: dict):
+#     start_time = time.perf_counter()
+#     BATCH_SIZE = 128
+#     term = preprocess_text(data.get("term", ""), True)
+#     chunk_list = data.get("tag_list", [])
+#     premise = data.get("premise_wrapper", "the photo has the following fragment in its description: '{term}'")
+#     hypothesis = data.get("hypothesis_wrapper", "the photo features {term}")
+#     if not term or not chunk_list:
+#         raise ValueError("Missing required fields (term, tag_list)")
+    
+#     batch_queries = [
+#         (premise.format(term=chunk['name']), hypothesis.format(term=term))
+#         for chunk in chunk_list
+#     ]
+#     chunk_names = [chunk['name'] for chunk in chunk_list]
+    
+#     modern_ce_classifier = models.MODELS["modern_ce_classifier"]
+    
+#     # Process in batches
+#     results = {}
+#     for i in range(0, len(batch_queries), BATCH_SIZE):
+#         batch = batch_queries[i:i+BATCH_SIZE]
+#         batch_names = chunk_names[i:i+BATCH_SIZE]
+        
+#         with torch.inference_mode():
+#             scores = modern_ce_classifier.predict(batch)
+        
+#         # Convert scores to labels - ModernCE outputs scores for [contradiction, entailment, neutral]
+#         label_mapping = ['contradiction', 'entailment', 'neutral']
+        
+#         for chunk_name, score_array in zip(batch_names, scores):
+#             predicted_label_idx = score_array.argmax()
+#             label = label_mapping[predicted_label_idx]
+#             confidence = score_array[predicted_label_idx]
+            
+#             if label == "entailment":
+#                 adjusted = 1 + confidence
+#             elif label == "neutral":
+#                 adjusted = confidence
+#             else:  # contradiction
+#                 adjusted = -confidence
+                
+#             results[chunk_name] = {
+#                 "adjusted_proximity": adjusted, 
+#                 "label": label, 
+#                 "score": float(confidence),
+#                 "all_scores": {
+#                     "contradiction": float(score_array[0]),
+#                     "entailment": float(score_array[1]),
+#                     "neutral": float(score_array[2])
+#                 }
+#             }
+    
+#     print(f"⏳ [Adjust Descs Proximities Modern - {term}] Tiempo de ejecución para {len(batch_queries)}: {time.perf_counter() - start_time:.4f} segundos")
+#     torch.cuda.empty_cache()
+#     return results
